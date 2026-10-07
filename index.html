@@ -70,7 +70,9 @@ td.n, th.n { text-align: right; }
   #printArea { display: block; color: #000; }
   #printArea h1 { font-size: 18px; margin: 0 0 2px; }
   #printArea h2 { font-size: 13px; margin: 14px 0 4px; }
-  #printArea table { font-size: 10px; }
+  #printArea table { font-size: 10px; line-height: 1.4; }
+  #printArea th, #printArea td { padding: 5px 6px 8px; overflow-wrap: break-word; vertical-align: top; }
+  #printArea h2 { page-break-after: avoid; }
   #printArea th { background: #e8e8e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   #printArea tr { page-break-inside: avoid; }
   #printArea thead { display: table-header-group; }
