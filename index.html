@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vessel Logbook</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b2a3d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Logbook">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root {
+  --navy: #0b2a3d; --navy2: #14425e; --accent: #1b7fa8; --bg: #f2f5f7; --card: #fff;
+  --text: #17212b; --muted: #5d6b78; --line: #d5dde3; --danger: #b3261e; --ok: #1e7a46;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
+header { background: var(--navy); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; position: sticky; top: 0; z-index: 5; }
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header .sub { font-size: 12px; opacity: .75; }
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--navy); display: flex; padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
+nav button { flex: 1; background: none; border: 0; color: #fff; opacity: .6; padding: 12px 4px; font-size: 13px; }
+nav button.on { opacity: 1; box-shadow: inset 0 3px 0 var(--accent); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.card h2 { margin: 0 0 8px; font-size: 16px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.row > * { flex: 1 1 140px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 3px; }
+input, select, textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
+textarea { min-height: 64px; resize: vertical; }
+button.btn { font: inherit; font-weight: 600; padding: 11px 16px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+button.btn.sec { background: #fff; color: var(--accent); }
+button.btn.danger { background: #fff; color: var(--danger); border-color: var(--danger); }
+button.btn.sm { padding: 6px 10px; font-size: 14px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.entry { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; }
+.entry .l b { display: block; }
+.entry .meta { font-size: 13px; color: var(--muted); }
+.entry .hrs { font-size: 20px; font-weight: 700; color: var(--navy2); text-align: right; white-space: nowrap; }
+.entry .hrs small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.live { color: var(--ok); font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.stat { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.stat b { display: block; font-size: 24px; color: var(--navy2); }
+.stat span { font-size: 12px; color: var(--muted); }
+.empty { text-align: center; color: var(--muted); padding: 30px 10px; }
+.note { font-size: 13px; color: var(--muted); }
+.warn { font-size: 13px; background: #fff7e0; border: 1px solid #ecd48a; border-radius: 8px; padding: 8px 10px; margin: 10px 0; }
+dialog { border: 0; border-radius: 12px; padding: 0; width: min(560px, 94vw); max-height: 92vh; }
+dialog::backdrop { background: rgba(0,0,0,.5); }
+dialog form { padding: 16px; }
+dialog h2 { margin: 0 0 4px; font-size: 18px; }
+.calc { font-size: 14px; font-weight: 600; color: var(--navy2); margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: top; }
+th { background: #eef2f5; }
+td.n, th.n { text-align: right; }
+.hidden { display: none !important; }
+
+/* ---------- PDF / print output ---------- */
+#printArea { display: none; }
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body { background: #fff; padding: 0; font-size: 11px; }
+  header, nav, main, dialog { display: none !important; }
+  #printArea { display: block; color: #000; }
+  #printArea h1 { font-size: 18px; margin: 0 0 2px; }
+  #printArea h2 { font-size: 13px; margin: 14px 0 4px; }
+  #printArea table { font-size: 10px; }
+  #printArea th { background: #e8e8e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #printArea tr { page-break-inside: avoid; }
+  #printArea thead { display: table-header-group; }
+  .sheet771 { page-break-after: always; }
+  .sheet771:last-child { page-break-after: auto; }
+  .sheet771 th { width: 1%; white-space: nowrap; }
+  .sigrow { display: flex; gap: 30px; margin-top: 26px; page-break-inside: avoid; }
+  .sigrow div { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 10px; }
+}
+.pmeta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px 20px; margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Vessel Logbook</h1>
+  <div class="sub" id="who">Crew sea service record</div>
+</header>
+
+<main>
+  <!-- LOG -->
+  <section id="tab-log">
+    <div class="actions" style="margin:0 0 12px">
+      <button class="btn" id="btnStart">▶ Start trip now</button>
+      <button class="btn sec" id="btnAdd">+ Add past trip</button>
+    </div>
+    <div id="logList"></div>
+  </section>
+
+  <!-- VESSELS -->
+  <section id="tab-vessels" class="hidden">
+    <div class="actions" style="margin:0 0 12px"><button class="btn" id="btnAddVessel">+ Add vessel</button></div>
+    <div id="vesselList"></div>
+  </section>
+
+  <!-- EXPORT -->
+  <section id="tab-export" class="hidden">
+    <div class="card">
+      <h2>Sea service report (PDF)</h2>
+      <div class="row">
+        <div><label>From</label><input type="date" id="xFrom"></div>
+        <div><label>To</label><input type="date" id="xTo"></div>
+      </div>
+      <label>Vessel</label>
+      <select id="xVessel"></select>
+      <div id="xPreview" style="margin-top:12px"></div>
+      <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button></div>
+      <div class="warn"><b>Check with AMSA:</b> for near coastal certificates AMSA accepts a Record of sea service (form 771), its sea service letter template signed by a supervisor/operator/owner/master/chief engineer, or an AMSA-approved task book. A logbook PDF is not on that list by itself. <b>Form 771 sheets</b> gives one page per vessel / duty / operation type with the details to transfer onto (or attach to) AMSA\u2019s official form 771 for your supervisor to sign. The <b>Logbook PDF</b> is the full record as supporting evidence.</div>
+      <p class="note">Opens the print dialog. Choose <b>Save as PDF</b> (on iPhone/iPad: share icon → Save to Files; on Android: Save as PDF). The report includes blank lines for the Master / owner to sign and date.</p>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>Crew member</h2>
+      <label>Full name</label><input id="pName" autocomplete="name">
+      <div class="row">
+        <div><label>AMSA client no. (if known)</label><input id="pId"></div>
+        <div><label>Certificate held / sought</label><input id="pCert" placeholder="e.g. Coxswain, Master &lt; 24m NC"></div>
+      </div>
+      <div class="row">
+        <div><label>Date of birth</label><input type="date" id="pDob"></div>
+        <div><label>Phone / email</label><input id="pContact"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>How sea days are counted</h2>
+      <p class="note">Per AMSA near coastal rules: one day of sea service = 8 hours of work relevant to the certificate. Shifts shorter than 8 hours are added together until they reach 8 hours; more than 8 hours in a 24-hour period still counts as one day only. Time when the vessel is not underway (and not at anchor with someone on watch) is counted separately because AMSA caps it at 15% of the service required for a deck certificate (33% for engineering).</p>
+    </div>
+    <div class="card">
+      <h2>Backup</h2>
+      <p class="note">Data is stored only on this device. If you clear browser data or lose the device it is gone, so export a backup regularly.</p>
+      <div class="actions">
+        <button class="btn sec" id="btnBackup">Export backup (JSON)</button>
+        <button class="btn sec" id="btnRestore">Import backup…</button>
+        <input type="file" id="fileRestore" accept="application/json,.json" class="hidden">
+      </div>
+      <div class="note" id="persistNote" style="margin-top:10px"></div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="log" class="on">Log</button>
+  <button data-tab="vessels">Vessels</button>
+  <button data-tab="export">Export</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<!-- Trip dialog -->
+<dialog id="dlgEntry">
+  <form method="dialog" id="fEntry" novalidate>
+    <h2 id="entryTitle">Trip</h2>
+    <label>Vessel</label><select id="eVessel"></select>
+    <div class="row">
+      <div><label>Start of duty (date &amp; time)</label><input type="datetime-local" id="eStart"></div>
+      <div><label>End of duty (blank = in progress)</label><input type="datetime-local" id="eEnd"></div>
+    </div>
+    <div class="calc" id="eCalc"></div>
+    <div class="row">
+      <div><label>From</label><input id="eFrom" placeholder="Departure port / location"></div>
+      <div><label>To</label><input id="eTo" placeholder="Arrival port / location"></div>
+    </div>
+    <div class="row">
+      <div><label>Position on board</label>
+        <select id="eRole"><option>Master</option><option>Mate</option><option>Coxswain</option><option>GPH</option><option>Engineer</option><option>Other</option></select>
+      </div>
+      <div><label>Duty type (AMSA code)</label>
+        <select id="eDuty">
+          <option value="D">D – Deck</option><option value="INW">INW – Deck, in charge of nav watch</option>
+          <option value="C">C – Coxswain (vessel under 12 m)</option><option value="GPH">GPH – General purpose hand</option>
+          <option value="DE">DE – Deck and engineering</option><option value="E">E – Engineering</option>
+          <option value="AE">AE – Engineering</option><option value="EW">EW – Engineering</option><option value="EIC">EIC – Engineering</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>Type of operation</label>
+        <select id="eOp"><option value="C">Commercial</option><option value="R">Recreational</option><option value="M">Military</option></select>
+      </div>
+      <div><label>Vessel status during duty</label>
+        <select id="eStatus"><option value="uw">Underway / at anchor with watch kept</option><option value="nu">Not underway (alongside, refit etc.)</option></select>
+      </div>
+    </div>
+    <label>Task / activity</label>
+    <input id="eActivity" list="activities" placeholder="e.g. Passenger charter, Fishing, Ferry run">
+    <datalist id="activities"><option>Passenger charter</option><option>Ferry service</option><option>Fishing</option><option>Survey / research</option><option>Towing</option><option>Crew transfer</option><option>Training</option><option>Delivery voyage</option></datalist>
+    <label>Supervisor / master on the day</label><input id="eMaster" placeholder="Name">
+    <label>Remarks (weather, sea state, incidents)</label><textarea id="eRemarks"></textarea>
+    <div class="warn hidden" id="eErr"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="eSave">Save</button>
+      <button type="button" class="btn sec" id="eCancel">Cancel</button>
+      <button type="button" class="btn danger hidden" id="eDelete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Vessel dialog -->
+<dialog id="dlgVessel">
+  <form method="dialog" id="fVessel" novalidate>
+    <h2 id="vesselTitle">Vessel</h2>
+    <label>Vessel name</label><input id="vName">
+    <div class="row">
+      <div><label>Unique vessel identifier / IMO no.</label><input id="vReg"></div>
+      <div><label>Measured length (m)</label><input type="number" id="vLen" min="0" step="0.1" inputmode="decimal"></div>
+    </div>
+    <div class="row">
+      <div><label>Type</label><input id="vType" placeholder="e.g. Passenger, Fishing, Workboat"></div>
+      <div><label>Propulsion type</label><input id="vProp" placeholder="e.g. Inboard diesel, Outboard"></div>
+    </div>
+    <div class="row">
+      <div><label>Propulsion power (kW)</label><input type="number" id="vKw" min="0" step="any" inputmode="decimal"></div>
+      <div><label>No. of propulsion engines</label><input type="number" id="vEng" min="0" step="1" inputmode="numeric"></div>
+    </div>
+    <div class="row">
+      <div><label>Area of operation (form 771 code)</label>
+        <select id="vArea">
+          <option value="">— select —</option>
+          <option>FG</option><option>A</option><option>A600</option><option>B</option><option>D</option><option>E</option>
+          <option>SH</option><option>I</option><option>I(SW)</option><option>I(BSW)</option><option>SW</option>
+        </select>
+      </div>
+      <div><label>Company / business name</label><input id="vOwner"></div>
+    </div>
+    <div class="warn hidden" id="vErr"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="vSave">Save</button>
+      <button type="button" class="btn sec" id="vCancel">Cancel</button>
+      <button type="button" class="btn danger hidden" id="vDelete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="printArea"></div>
+
+<script>
+'use strict';
+const KEY = 'vessel-logbook-v1';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// ── State ────────────────────────────────────────────────
+const blank = () => ({
+  profile: { name: '', id: '', cert: '', contact: '', dob: '' },
+  settings: { lastVessel: '', lastRole: 'Master', lastDuty: 'D', lastOp: 'C', lastMaster: '' },
+  vessels: [],
+  entries: []
+});
+let S = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) { const d = JSON.parse(raw); const b = blank(); return { ...b, ...d, profile: { ...b.profile, ...d.profile }, settings: { ...b.settings, ...d.settings } }; }
+  } catch (e) { console.warn('load failed', e); }
+  return blank();
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch (e) { alert('Could not save data: storage is full or blocked. Export a backup now.'); }
+}
+
+// ── Date helpers (all local time) ────────────────────────
+const p2 = n => String(n).padStart(2, '0');
+const toLocalInput = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+const dateKey = s => s.slice(0, 10);
+const fmtDate = s => { const [y, m, d] = dateKey(s).split('-'); return `${d}/${m}/${y}`; };
+const fmtTime = s => s.slice(11, 16);
+const fmtDT = s => `${fmtDate(s)} ${fmtTime(s)}`;
+const hoursBetween = (a, b) => (new Date(b) - new Date(a)) / 36e5;
+const fmtH = h => h.toFixed(1);
+const entryHours = e => e.end ? Math.max(0, hoursBetween(e.start, e.end)) : 0;
+const vesselOf = id => S.vessels.find(v => v.id === id);
+
+// ── Tabs ─────────────────────────────────────────────────
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(t) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['log', 'vessels', 'export', 'settings'].forEach(n => $('tab-' + n).classList.toggle('hidden', n !== t));
+  if (t === 'export') renderExport();
+  window.scrollTo(0, 0);
+}
+
+// ── Log list ─────────────────────────────────────────────
+function renderLog() {
+  const list = $('logList');
+  const sorted = [...S.entries].sort((a, b) => b.start.localeCompare(a.start));
+  if (!sorted.length) {
+    list.innerHTML = '<div class="empty">No trips logged yet.<br>Add a vessel, then tap <b>Start trip now</b>.</div>';
+    return;
+  }
+  list.innerHTML = sorted.map(e => {
+    const v = vesselOf(e.vesselId);
+    const live = !e.end;
+    return `<div class="card entry" data-id="${e.id}">
+      <div class="l">
+        <b>${esc(v ? v.name : 'Unknown vessel')}</b>
+        <div class="meta">${fmtDT(e.start)}${live ? '' : ' → ' + fmtDT(e.end)}</div>
+        <div class="meta">${esc(e.role)} (${esc(e.duty || 'D')})${e.status === 'nu' ? ' · not underway' : ''}${e.activity ? ' · ' + esc(e.activity) : ''}${e.from || e.to ? ' · ' + esc(e.from) + ' → ' + esc(e.to) : ''}</div>
+      </div>
+      <div class="hrs">${live ? '<span class="live">In progress</span>' : fmtH(entryHours(e)) + '<small>hours</small>'}
+        ${live ? '<br><button class="btn sm" data-end="' + e.id + '">End now</button>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.entry').forEach(el => el.onclick = ev => {
+    if (ev.target.dataset.end) return;
+    openEntry(el.dataset.id);
+  });
+  list.querySelectorAll('[data-end]').forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    const e = S.entries.find(x => x.id === b.dataset.end);
+    e.end = toLocalInput(new Date());
+    save(); renderLog();
+  });
+}
+
+// ── Entry dialog ─────────────────────────────────────────
+let editingEntry = null;
+function fillVesselSelect(sel, selected, withAll) {
+  sel.innerHTML = (withAll ? '<option value="">All vessels</option>' : '') +
+    S.vessels.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  if (selected) sel.value = selected;
+}
+function openEntry(id, startNow) {
+  if (!S.vessels.length) { alert('Add a vessel first (Vessels tab).'); showTab('vessels'); return; }
+  editingEntry = id ? S.entries.find(e => e.id === id) : null;
+  const e = editingEntry || { vesselId: S.settings.lastVessel, role: S.settings.lastRole, duty: S.settings.lastDuty, op: S.settings.lastOp, status: 'uw', master: S.settings.lastMaster, start: '', end: '' };
+  $('entryTitle').textContent = editingEntry ? 'Edit trip' : (startNow ? 'Start trip' : 'Add past trip');
+  fillVesselSelect($('eVessel'), e.vesselId);
+  $('eStart').value = startNow ? toLocalInput(new Date()) : e.start;
+  $('eEnd').value = e.end || '';
+  $('eFrom').value = e.from || ''; $('eTo').value = e.to || '';
+  $('eRole').value = e.role || 'Master';
+  $('eDuty').value = e.duty || 'D'; $('eOp').value = e.op || 'C'; $('eStatus').value = e.status || 'uw';
+  $('eActivity').value = e.activity || '';
+  $('eMaster').value = e.master || '';
+  $('eRemarks').value = e.remarks || '';
+  $('eDelete').classList.toggle('hidden', !editingEntry);
+  $('eErr').classList.add('hidden');
+  updateCalc();
+  $('dlgEntry').showModal();
+}
+function updateCalc() {
+  const s = $('eStart').value, e = $('eEnd').value;
+  $('eCalc').textContent = s && e ? `Duration: ${fmtH(Math.max(0, hoursBetween(s, e)))} h` : '';
+}
+$('eStart').oninput = $('eEnd').oninput = updateCalc;
+$('btnStart').onclick = () => openEntry(null, true);
+$('btnAdd').onclick = () => openEntry(null, false);
+$('eCancel').onclick = () => $('dlgEntry').close();
+$('eSave').onclick = () => {
+  const start = $('eStart').value, end = $('eEnd').value;
+  const err = m => { $('eErr').textContent = m; $('eErr').classList.remove('hidden'); };
+  if (!$('eVessel').value) return err('Select a vessel.');
+  if (!start) return err('Enter the start date and time.');
+  if (end && end <= start) return err('End must be after start.');
+  if (end && hoursBetween(start, end) > 72 && !confirm('This trip is over 72 hours. Is that correct?')) return;
+  const rec = {
+    id: editingEntry ? editingEntry.id : uid(),
+    vesselId: $('eVessel').value, start, end,
+    from: $('eFrom').value.trim(), to: $('eTo').value.trim(),
+    role: $('eRole').value, duty: $('eDuty').value, op: $('eOp').value, status: $('eStatus').value,
+    activity: $('eActivity').value.trim(), master: $('eMaster').value.trim(),
+    remarks: $('eRemarks').value.trim()
+  };
+  if (editingEntry) Object.assign(editingEntry, rec); else S.entries.push(rec);
+  Object.assign(S.settings, { lastVessel: rec.vesselId, lastRole: rec.role, lastDuty: rec.duty, lastOp: rec.op, lastMaster: rec.master });
+  save(); $('dlgEntry').close(); renderLog();
+};
+$('eDelete').onclick = () => {
+  if (!confirm('Delete this trip permanently?')) return;
+  S.entries = S.entries.filter(e => e !== editingEntry);
+  save(); $('dlgEntry').close(); renderLog();
+};
+
+// ── Vessels ──────────────────────────────────────────────
+let editingVessel = null;
+function renderVessels() {
+  const el = $('vesselList');
+  if (!S.vessels.length) { el.innerHTML = '<div class="empty">No vessels yet.</div>'; return; }
+  el.innerHTML = S.vessels.map(v => `<div class="card entry" data-id="${v.id}"><div class="l">
+    <b>${esc(v.name)}</b>
+    <div class="meta">${[v.type, v.len ? v.len + ' m' : '', v.reg, v.area && 'Area ' + v.area].filter(Boolean).map(esc).join(' · ')}</div>
+    </div></div>`).join('');
+  el.querySelectorAll('.entry').forEach(x => x.onclick = () => openVessel(x.dataset.id));
+}
+function openVessel(id) {
+  editingVessel = id ? vesselOf(id) : null;
+  const v = editingVessel || {};
+  $('vesselTitle').textContent = editingVessel ? 'Edit vessel' : 'Add vessel';
+  $('vName').value = v.name || ''; $('vReg').value = v.reg || ''; $('vLen').value = v.len ?? '';
+  $('vType').value = v.type || ''; $('vProp').value = v.prop || ''; $('vArea').value = v.area || '';
+  $('vKw').value = v.kw ?? ''; $('vEng').value = v.eng ?? '';
+  $('vOwner').value = v.owner || '';
+  $('vDelete').classList.toggle('hidden', !editingVessel);
+  $('vErr').classList.add('hidden');
+  $('dlgVessel').showModal();
+}
+$('btnAddVessel').onclick = () => openVessel(null);
+$('vCancel').onclick = () => $('dlgVessel').close();
+$('vSave').onclick = () => {
+  const name = $('vName').value.trim();
+  if (!name) { $('vErr').textContent = 'Vessel name is required.'; $('vErr').classList.remove('hidden'); return; }
+  const rec = {
+    id: editingVessel ? editingVessel.id : uid(), name, reg: $('vReg').value.trim(),
+    len: $('vLen').value === '' ? null : +$('vLen').value, type: $('vType').value.trim(),
+    prop: $('vProp').value.trim(), kw: $('vKw').value === '' ? null : +$('vKw').value, eng: $('vEng').value === '' ? null : +$('vEng').value, area: $('vArea').value, owner: $('vOwner').value.trim()
+  };
+  if (editingVessel) Object.assign(editingVessel, rec); else { S.vessels.push(rec); if (!S.settings.lastVessel) S.settings.lastVessel = rec.id; }
+  save(); $('dlgVessel').close(); renderVessels(); renderLog();
+};
+$('vDelete').onclick = () => {
+  const n = S.entries.filter(e => e.vesselId === editingVessel.id).length;
+  if (n) return alert(`This vessel has ${n} logged trip(s). Delete or reassign them first.`);
+  if (!confirm('Delete this vessel?')) return;
+  S.vessels = S.vessels.filter(v => v !== editingVessel);
+  save(); $('dlgVessel').close(); renderVessels();
+};
+
+// ── Summary / report ─────────────────────────────────────
+// AMSA near coastal rule: 1 day = 8 hours of relevant work. Shifts under 8 h are
+// added together; more than 8 h in a 24 h period still counts as one day.
+const DAY_H = 8;
+function hoursByDate(e) {            // split a duty across midnight into calendar dates
+  const out = {};
+  let t = new Date(e.start); const end = new Date(e.end);
+  while (t < end) {
+    const next = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1);
+    const seg = next < end ? next : end;
+    const k = toLocalInput(t).slice(0, 10);
+    out[k] = (out[k] || 0) + (seg - t) / 36e5;
+    t = seg;
+  }
+  return out;
+}
+function countDays(list) {
+  const perDay = {};
+  list.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => perDay[k] = (perDay[k] || 0) + h));
+  let full = 0, rem = 0;
+  Object.values(perDay).forEach(h => { if (h >= DAY_H - 1e-9) full++; else rem += h; });
+  return full + Math.floor((rem + 1e-9) / DAY_H);
+}
+function filtered() {
+  const from = $('xFrom').value, to = $('xTo').value, vid = $('xVessel').value;
+  return S.entries
+    .filter(e => e.end && (!from || dateKey(e.start) >= from) && (!to || dateKey(e.start) <= to) && (!vid || e.vesselId === vid))
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
+function summarise(list) {
+  const uw = list.filter(e => e.status !== 'nu'), nu = list.filter(e => e.status === 'nu');
+  return {
+    trips: list.length,
+    hours: list.reduce((s, e) => s + entryHours(e), 0),
+    daysUW: countDays(uw), daysNU: countDays(nu)
+  };
+}
+// One line per vessel + position + duty + operation type + status (mirrors one AMSA 771 form each)
+function groupLines(list) {
+  const g = {};
+  list.forEach(e => {
+    const k = [e.vesselId, e.role, e.duty || 'D', e.op || 'C', e.status === 'nu' ? 'nu' : 'uw'].join('|');
+    (g[k] = g[k] || []).push(e);
+  });
+  return Object.values(g).map(es => ({
+    vessel: vesselOf(es[0].vesselId), role: es[0].role, duty: es[0].duty || 'D', op: es[0].op || 'C',
+    status: es[0].status === 'nu' ? 'nu' : 'uw',
+    first: es[0].start, last: es[es.length - 1].end, hours: es.reduce((s, e) => s + entryHours(e), 0), days: countDays(es)
+  })).sort((a, b) => a.first.localeCompare(b.first));
+}
+function renderExport() {
+  if (!$('xFrom').dataset.init) {
+    const dates = S.entries.map(e => dateKey(e.start)).sort();
+    $('xFrom').value = dates[0] || ''; $('xTo').value = dates[dates.length - 1] || '';
+    $('xFrom').dataset.init = 1;
+  }
+  const sel = $('xVessel'), cur = sel.value;
+  fillVesselSelect(sel, cur, true);
+  updateExportPreview();
+}
+function updateExportPreview() {
+  const s = summarise(filtered());
+  $('xPreview').innerHTML = `<div class="stats">
+    <div class="stat"><b>${s.daysUW}</b><span>sea days (8 h)</span></div>
+    <div class="stat"><b>${s.daysNU}</b><span>days not underway</span></div>
+    <div class="stat"><b>${fmtH(s.hours)}</b><span>hours worked</span></div>
+    <div class="stat"><b>${s.trips}</b><span>duty entries</span></div></div>`;
+}
+['xFrom', 'xTo', 'xVessel'].forEach(id => $(id).onchange = updateExportPreview);
+const OPS = { C: 'Commercial', R: 'Recreational', M: 'Military' };
+
+function runExport(kind) {
+  const list = filtered();
+  if (!list.length) return alert('No completed entries in that range.');
+  if (!S.profile.name && !confirm('Your name is blank (Settings tab). Create the report anyway?')) return;
+  const p = S.profile, lines = groupLines(list), tot = summarise(list);
+  const vessels = [...new Set(list.map(e => e.vesselId))].map(vesselOf).filter(Boolean);
+  const dash = v => (v === '' || v == null) ? '—' : esc(v);
+  if (kind === '771') { $('printArea').innerHTML = sheets771(list, lines, p); window.print(); return; }
+  $('printArea').innerHTML = `
+    <h1>Record of Sea Service – Near Coastal</h1>
+    <div>Prepared ${fmtDT(toLocalInput(new Date()))} from the applicant's digital vessel logbook. Supporting record for completion of AMSA Record of sea service (form 771); one 771 is needed per line in section 2.</div>
+    <h2>1. Applicant</h2>
+    <div class="pmeta">
+      <div><b>Name:</b> ${dash(p.name)}</div><div><b>Date of birth:</b> ${p.dob ? fmtDate(p.dob) : '—'}</div>
+      <div><b>Phone / email:</b> ${dash(p.contact)}</div><div><b>AMSA client no.:</b> ${dash(p.id)}</div>
+      <div><b>Certificate sought:</b> ${dash(p.cert)}</div>
+      <div><b>Period:</b> ${fmtDate(list[0].start)} to ${fmtDate(list[list.length - 1].end)}</div>
+    </div>
+    <h2>2. Sea service summary (1 day = 8 hours of work)</h2>
+    <table><thead><tr><th>Company / business</th><th>Position</th><th>Vessel</th><th>Unique vessel ID / IMO</th><th>Start date</th><th>End date</th><th class="n">Days (8 h)</th><th>Area</th><th>Operation</th><th>Duty</th><th>Vessel status</th><th class="n">Length (m)</th><th>Propulsion</th><th class="n">kW</th><th class="n">Engines</th></tr></thead><tbody>
+    ${lines.map(l => { const v = l.vessel || {}; return `<tr><td>${esc(v.owner)}</td><td>${esc(l.role)}</td><td>${esc(v.name)}</td><td>${esc(v.reg)}</td><td>${fmtDate(l.first)}</td><td>${fmtDate(l.last)}</td><td class="n"><b>${l.days}</b></td><td>${esc(v.area)}</td><td>${OPS[l.op]}</td><td>${esc(l.duty)}</td><td>${l.status === 'nu' ? 'Not underway' : 'Underway / at anchor, watch kept'}</td><td class="n">${v.len ?? ''}</td><td>${esc(v.prop)}</td><td class="n">${v.kw ?? ''}</td><td class="n">${v.eng ?? ''}</td></tr>`; }).join('')}
+    </tbody></table>
+    <p><b>Total:</b> ${tot.daysUW} day(s) underway / at anchor with watch kept; ${tot.daysNU} day(s) not underway (AMSA limits not-underway time to 15% of the service required for a deck certificate, 33% for engineering). Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.</p>
+    <h2>3. Duty record</h2>
+    <table><thead><tr><th>#</th><th>Vessel</th><th>Start</th><th>End</th><th class="n">Hours</th><th>Position</th><th>Duty</th><th>Operation</th><th>Status</th><th>From</th><th>To</th><th>Task</th><th>Supervisor / master</th><th>Remarks</th></tr></thead><tbody>
+    ${list.map((e, i) => { const v = vesselOf(e.vesselId); return `<tr><td>${i + 1}</td><td>${esc(v ? v.name : '')}</td><td>${fmtDT(e.start)}</td><td>${fmtDT(e.end)}</td><td class="n">${fmtH(entryHours(e))}</td><td>${esc(e.role)}</td><td>${esc(e.duty || 'D')}</td><td>${OPS[e.op || 'C']}</td><td>${e.status === 'nu' ? 'Not underway' : 'Underway'}</td><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.activity)}</td><td>${esc(e.master)}</td><td>${esc(e.remarks)}</td></tr>`; }).join('')}
+    </tbody></table>
+    <h2>4. Declaration</h2>
+    <p>Applicant: I declare the sea service above is true and correct.</p>
+    <div class="sigrow"><div>Applicant signature</div><div>Date</div></div>
+    <p>Supervisor: I confirm the applicant served in the capacity and for the periods recorded above.</p>
+    <div class="pmeta" style="margin-top:10px">
+      <div>Supervisor name: ______________________________</div><div>Position / role (Master in charge, Engineer in charge, Owner, Other): ____________________</div>
+      <div>Certificate of competency held: ______________________</div><div>Email / phone: ______________________________</div>
+    </div>
+    <div class="sigrow"><div>Supervisor signature (handwritten or electronic; typed names are not accepted by AMSA)</div><div>Date</div></div>`;
+  window.print();
+}
+$('btnPdf').onclick = () => runExport('log');
+$('btnPdf771').onclick = () => runExport('771');
+
+// One sheet per line of groupLines(): mirrors AMSA form 771 (one vessel, one operation mode, one duty type)
+function sheets771(list, lines, p) {
+  const dash = v => (v === '' || v == null) ? '&nbsp;' : esc(v);
+  return lines.map((l, i) => {
+    const v = l.vessel || {};
+    const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && (e.status === 'nu' ? 'nu' : 'uw') === l.status);
+    const dates = {};
+    es.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => dates[k] = (dates[k] || 0) + h));
+    const dateList = Object.keys(dates).sort().map(k => `${fmtDate(k)} (${fmtH(dates[k])} h)`).join(', ');
+    return `<div class="sheet771">
+      <h1>Record of Sea Service (Form 771 data sheet) <span style="font-weight:normal;font-size:12px">– sheet ${i + 1} of ${lines.length}</span></h1>
+      <div style="font-size:10px">Near coastal certificates. One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work.</div>
+      <h2>Seafarer / applicant details</h2>
+      <table><tr><th>Name</th><td>${dash(p.name)}</td><th>Date of birth</th><td>${p.dob ? fmtDate(p.dob) : '&nbsp;'}</td><th>Phone / email</th><td>${dash(p.contact)}</td></tr></table>
+      <h2>Operational and vessel details</h2>
+      <table>
+        <tr><th>Company / business name</th><td>${dash(v.owner)}</td><th>Position on board</th><td>${dash(l.role)}</td><th>Vessel name</th><td>${dash(v.name)}</td><th>Unique vessel identifier / IMO no.</th><td>${dash(v.reg)}</td></tr>
+        <tr><th>Start date</th><td>${fmtDate(l.first)}</td><th>End date</th><td>${fmtDate(l.last)}</td><th>Number of days (8 hrs)</th><td><b>${l.days}</b></td><th>Area of operation</th><td>${dash(v.area)}</td></tr>
+        <tr><th>Type of operation</th><td>${OPS[l.op]}</td><th>Duties</th><td>${esc(l.duty)}</td><th>Measured length (m)</th><td>${dash(v.len)}</td><th>Propulsion type</th><td>${dash(v.prop)}</td></tr>
+        <tr><th>Propulsion power (kW)</th><td>${dash(v.kw)}</td><th>No. of propulsion engines</th><td>${dash(v.eng)}</td><th colspan="2">Vessel status</th><td colspan="2">${l.status === 'nu' ? '<b>Not underway</b> – counts toward the 15% (deck) / 33% (engineering) cap' : 'Underway / at anchor with watch kept'}</td></tr>
+      </table>
+      <p style="font-size:10px"><b>Dates and hours worked:</b> ${dateList}</p>
+      <div class="sigrow"><div>Applicant signature</div><div>Date</div></div>
+      <h2>Supervisor details</h2>
+      <table>
+        <tr><th>Supervisor name</th><td style="height:22px"></td><th>Position</th><td></td></tr>
+        <tr><th>Email</th><td style="height:22px"></td><th>Phone</th><td></td></tr>
+        <tr><th>Certificate of competency held</th><td style="height:22px"></td><th>Role</th><td>☐ Master in charge &nbsp; ☐ Engineer in charge &nbsp; ☐ Owner &nbsp; ☐ Other</td></tr>
+      </table>
+      <div class="sigrow"><div>Supervisor signature (handwritten or electronic – typed names are not accepted)</div><div>Date</div></div>
+      <p style="font-size:9px;margin-top:14px">Generated ${fmtDT(toLocalInput(new Date()))} from the applicant's digital logbook. This sheet carries the details for AMSA form 771 and is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. Any amendments must be signed and dated by the supervisor.</p>
+    </div>`;
+  }).join('');
+}
+
+// ── Settings ─────────────────────────────────────────────
+function renderSettings() {
+  $('pName').value = S.profile.name; $('pId').value = S.profile.id;
+  $('pCert').value = S.profile.cert; $('pContact').value = S.profile.contact; $('pDob').value = S.profile.dob;
+  $('who').textContent = S.profile.name ? S.profile.name + ' · sea service record' : 'Crew sea service record';
+}
+[['pName', 'name'], ['pId', 'id'], ['pCert', 'cert'], ['pContact', 'contact'], ['pDob', 'dob']].forEach(([el, k]) =>
+  $(el).oninput = () => { S.profile[k] = $(el).value.trim(); save(); renderSettings(); });
+
+$('btnBackup').onclick = () => {
+  const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `logbook-backup-${toLocalInput(new Date()).slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('btnRestore').onclick = () => $('fileRestore').click();
+$('fileRestore').onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!Array.isArray(d.entries) || !Array.isArray(d.vessels)) throw new Error('not a logbook backup');
+    if (!confirm(`Replace ALL current data with this backup (${d.entries.length} trips, ${d.vessels.length} vessels)?`)) return;
+    const b = blank();
+    S = { ...b, ...d, profile: { ...b.profile, ...d.profile }, settings: { ...b.settings, ...d.settings } };
+    save(); init();
+  } catch (e) { alert('Could not import: ' + e.message); }
+};
+
+// ── Init ─────────────────────────────────────────────────
+function init() {
+  renderSettings(); renderVessels(); renderLog();
+  $('xFrom').dataset.init = '';
+}
+init();
+
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().then(ok => {
+    $('persistNote').textContent = ok ? 'Browser has granted persistent storage.' : 'Browser has not guaranteed persistent storage – keep backups.';
+  });
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
