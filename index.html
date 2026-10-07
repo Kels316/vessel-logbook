@@ -181,10 +181,11 @@ td.n, th.n { text-align: right; }
       </div>
       <div><label>Duty type (AMSA code)</label>
         <select id="eDuty">
-          <option value="D">D – Deck</option><option value="INW">INW – Deck, in charge of nav watch</option>
-          <option value="C">C – Coxswain (vessel under 12 m)</option><option value="GPH">GPH – General purpose hand</option>
-          <option value="DE">DE – Deck and engineering</option><option value="E">E – Engineering</option>
-          <option value="AE">AE – Engineering</option><option value="EW">EW – Engineering</option><option value="EIC">EIC – Engineering</option>
+          <option value="D">D – Deck work</option><option value="INW">INW – In charge of nav watch / OOW</option>
+          <option value="C">C – Coxswain Grade 1 or 2</option><option value="GPH">GPH – General purpose hand</option>
+          <option value="DE">DE – Deck and engineering</option><option value="E">E – Engineer or engine driver</option>
+          <option value="AE">AE – Assistant to engineer / engine driver</option><option value="EW">EW – Engineer watchkeeper</option>
+          <option value="EIC">EIC – Engineer in charge</option><option value="AEIC">AEIC – Assistant to engineer in charge</option>
         </select>
       </div>
     </div>
@@ -192,8 +193,8 @@ td.n, th.n { text-align: right; }
       <div><label>Type of operation</label>
         <select id="eOp"><option value="C">Commercial</option><option value="R">Recreational</option><option value="M">Military</option></select>
       </div>
-      <div><label>Vessel status during duty</label>
-        <select id="eStatus"><option value="uw">Underway / at anchor with watch kept</option><option value="nu">Not underway (alongside, refit etc.)</option></select>
+      <div><label>Mode of operation</label>
+        <select id="eStatus"><option value="VU">VU – Vessel underway</option><option value="NUD">NUD – Not underway, deck or refit work</option><option value="NUE">NUE – Not underway, engine or refit work</option></select>
       </div>
     </div>
     <label>Task / activity</label>
@@ -221,20 +222,13 @@ td.n, th.n { text-align: right; }
     </div>
     <div class="row">
       <div><label>Type</label><input id="vType" placeholder="e.g. Passenger, Fishing, Workboat"></div>
-      <div><label>Propulsion type</label><input id="vProp" placeholder="e.g. Inboard diesel, Outboard"></div>
+      <div><label>Propulsion type</label><select id="vProp"><option value="">— select —</option><option value="I">I – Inboard</option><option value="O">O – Outboard</option><option value="S">S – Steam</option></select></div>
     </div>
     <div class="row">
       <div><label>Propulsion power (kW)</label><input type="number" id="vKw" min="0" step="any" inputmode="decimal"></div>
       <div><label>No. of propulsion engines</label><input type="number" id="vEng" min="0" step="1" inputmode="numeric"></div>
     </div>
     <div class="row">
-      <div><label>Area of operation (form 771 code)</label>
-        <select id="vArea">
-          <option value="">— select —</option>
-          <option>FG</option><option>A</option><option>A600</option><option>B</option><option>D</option><option>E</option>
-          <option>SH</option><option>I</option><option>I(SW)</option><option>I(BSW)</option><option>SW</option>
-        </select>
-      </div>
       <div><label>Company / business name</label><input id="vOwner"></div>
     </div>
     <div class="warn hidden" id="vErr"></div>
@@ -286,6 +280,9 @@ const fmtDT = s => `${fmtDate(s)} ${fmtTime(s)}`;
 const hoursBetween = (a, b) => (new Date(b) - new Date(a)) / 36e5;
 const fmtH = h => h.toFixed(1);
 const entryHours = e => e.end ? Math.max(0, hoursBetween(e.start, e.end)) : 0;
+const MODES = { VU: 'Vessel underway', NUD: 'Not underway – deck / refit work', NUE: 'Not underway – engine / refit work' };
+const modeOf = e => (e.status === 'NUD' || e.status === 'NUE') ? e.status : (e.status === 'nu' ? 'NUD' : 'VU');
+const PROP = { I: 'I – Inboard', O: 'O – Outboard', S: 'S – Steam' };
 const vesselOf = id => S.vessels.find(v => v.id === id);
 
 // ── Tabs ─────────────────────────────────────────────────
@@ -312,7 +309,7 @@ function renderLog() {
       <div class="l">
         <b>${esc(v ? v.name : 'Unknown vessel')}</b>
         <div class="meta">${fmtDT(e.start)}${live ? '' : ' → ' + fmtDT(e.end)}</div>
-        <div class="meta">${esc(e.role)} (${esc(e.duty || 'D')})${e.status === 'nu' ? ' · not underway' : ''}${e.activity ? ' · ' + esc(e.activity) : ''}${e.from || e.to ? ' · ' + esc(e.from) + ' → ' + esc(e.to) : ''}</div>
+        <div class="meta">${esc(e.role)} (${esc(e.duty || 'D')})${modeOf(e) !== 'VU' ? ' · ' + modeOf(e) : ''}${e.activity ? ' · ' + esc(e.activity) : ''}${e.from || e.to ? ' · ' + esc(e.from) + ' → ' + esc(e.to) : ''}</div>
       </div>
       <div class="hrs">${live ? '<span class="live">In progress</span>' : fmtH(entryHours(e)) + '<small>hours</small>'}
         ${live ? '<br><button class="btn sm" data-end="' + e.id + '">End now</button>' : ''}
@@ -341,14 +338,14 @@ function fillVesselSelect(sel, selected, withAll) {
 function openEntry(id, startNow) {
   if (!S.vessels.length) { alert('Add a vessel first (Vessels tab).'); showTab('vessels'); return; }
   editingEntry = id ? S.entries.find(e => e.id === id) : null;
-  const e = editingEntry || { vesselId: S.settings.lastVessel, role: S.settings.lastRole, duty: S.settings.lastDuty, op: S.settings.lastOp, status: 'uw', master: S.settings.lastMaster, start: '', end: '' };
+  const e = editingEntry || { vesselId: S.settings.lastVessel, role: S.settings.lastRole, duty: S.settings.lastDuty, op: S.settings.lastOp, status: 'VU', master: S.settings.lastMaster, start: '', end: '' };
   $('entryTitle').textContent = editingEntry ? 'Edit trip' : (startNow ? 'Start trip' : 'Add past trip');
   fillVesselSelect($('eVessel'), e.vesselId);
   $('eStart').value = startNow ? toLocalInput(new Date()) : e.start;
   $('eEnd').value = e.end || '';
   $('eFrom').value = e.from || ''; $('eTo').value = e.to || '';
   $('eRole').value = e.role || 'Master';
-  $('eDuty').value = e.duty || 'D'; $('eOp').value = e.op || 'C'; $('eStatus').value = e.status || 'uw';
+  $('eDuty').value = e.duty || 'D'; $('eOp').value = e.op || 'C'; $('eStatus').value = modeOf(e);
   $('eActivity').value = e.activity || '';
   $('eMaster').value = e.master || '';
   $('eRemarks').value = e.remarks || '';
@@ -397,7 +394,7 @@ function renderVessels() {
   if (!S.vessels.length) { el.innerHTML = '<div class="empty">No vessels yet.</div>'; return; }
   el.innerHTML = S.vessels.map(v => `<div class="card entry" data-id="${v.id}"><div class="l">
     <b>${esc(v.name)}</b>
-    <div class="meta">${[v.type, v.len ? v.len + ' m' : '', v.reg, v.area && 'Area ' + v.area].filter(Boolean).map(esc).join(' · ')}</div>
+    <div class="meta">${[v.type, v.len ? v.len + ' m' : '', v.reg].filter(Boolean).map(esc).join(' · ')}</div>
     </div></div>`).join('');
   el.querySelectorAll('.entry').forEach(x => x.onclick = () => openVessel(x.dataset.id));
 }
@@ -406,7 +403,7 @@ function openVessel(id) {
   const v = editingVessel || {};
   $('vesselTitle').textContent = editingVessel ? 'Edit vessel' : 'Add vessel';
   $('vName').value = v.name || ''; $('vReg').value = v.reg || ''; $('vLen').value = v.len ?? '';
-  $('vType').value = v.type || ''; $('vProp').value = v.prop || ''; $('vArea').value = v.area || '';
+  $('vType').value = v.type || ''; $('vProp').value = v.prop || '';
   $('vKw').value = v.kw ?? ''; $('vEng').value = v.eng ?? '';
   $('vOwner').value = v.owner || '';
   $('vDelete').classList.toggle('hidden', !editingVessel);
@@ -421,7 +418,7 @@ $('vSave').onclick = () => {
   const rec = {
     id: editingVessel ? editingVessel.id : uid(), name, reg: $('vReg').value.trim(),
     len: $('vLen').value === '' ? null : +$('vLen').value, type: $('vType').value.trim(),
-    prop: $('vProp').value.trim(), kw: $('vKw').value === '' ? null : +$('vKw').value, eng: $('vEng').value === '' ? null : +$('vEng').value, area: $('vArea').value, owner: $('vOwner').value.trim()
+    prop: $('vProp').value.trim(), kw: $('vKw').value === '' ? null : +$('vKw').value, eng: $('vEng').value === '' ? null : +$('vEng').value, owner: $('vOwner').value.trim()
   };
   if (editingVessel) Object.assign(editingVessel, rec); else { S.vessels.push(rec); if (!S.settings.lastVessel) S.settings.lastVessel = rec.id; }
   save(); $('dlgVessel').close(); renderVessels(); renderLog();
@@ -464,7 +461,7 @@ function filtered() {
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 function summarise(list) {
-  const uw = list.filter(e => e.status !== 'nu'), nu = list.filter(e => e.status === 'nu');
+  const uw = list.filter(e => modeOf(e) === 'VU'), nu = list.filter(e => modeOf(e) !== 'VU');
   return {
     trips: list.length,
     hours: list.reduce((s, e) => s + entryHours(e), 0),
@@ -475,12 +472,12 @@ function summarise(list) {
 function groupLines(list) {
   const g = {};
   list.forEach(e => {
-    const k = [e.vesselId, e.role, e.duty || 'D', e.op || 'C', e.status === 'nu' ? 'nu' : 'uw'].join('|');
+    const k = [e.vesselId, e.role, e.duty || 'D', e.op || 'C', modeOf(e)].join('|');
     (g[k] = g[k] || []).push(e);
   });
   return Object.values(g).map(es => ({
     vessel: vesselOf(es[0].vesselId), role: es[0].role, duty: es[0].duty || 'D', op: es[0].op || 'C',
-    status: es[0].status === 'nu' ? 'nu' : 'uw',
+    status: modeOf(es[0]),
     first: es[0].start, last: es[es.length - 1].end, hours: es.reduce((s, e) => s + entryHours(e), 0), days: countDays(es)
   })).sort((a, b) => a.first.localeCompare(b.first));
 }
@@ -524,13 +521,13 @@ function runExport(kind) {
       <div><b>Period:</b> ${fmtDate(list[0].start)} to ${fmtDate(list[list.length - 1].end)}</div>
     </div>
     <h2>2. Sea service summary (1 day = 8 hours of work)</h2>
-    <table><thead><tr><th>Company / business</th><th>Position</th><th>Vessel</th><th>Unique vessel ID / IMO</th><th>Start date</th><th>End date</th><th class="n">Days (8 h)</th><th>Area</th><th>Operation</th><th>Duty</th><th>Vessel status</th><th class="n">Length (m)</th><th>Propulsion</th><th class="n">kW</th><th class="n">Engines</th></tr></thead><tbody>
-    ${lines.map(l => { const v = l.vessel || {}; return `<tr><td>${esc(v.owner)}</td><td>${esc(l.role)}</td><td>${esc(v.name)}</td><td>${esc(v.reg)}</td><td>${fmtDate(l.first)}</td><td>${fmtDate(l.last)}</td><td class="n"><b>${l.days}</b></td><td>${esc(v.area)}</td><td>${OPS[l.op]}</td><td>${esc(l.duty)}</td><td>${l.status === 'nu' ? 'Not underway' : 'Underway / at anchor, watch kept'}</td><td class="n">${v.len ?? ''}</td><td>${esc(v.prop)}</td><td class="n">${v.kw ?? ''}</td><td class="n">${v.eng ?? ''}</td></tr>`; }).join('')}
+    <table><thead><tr><th>Company / business</th><th>Position</th><th>Vessel</th><th>Unique vessel ID / IMO</th><th>Start date</th><th>End date</th><th class="n">Days (8 h)</th><th>Mode</th><th>Operation</th><th>Duty</th><th class="n">Length (m)</th><th>Propulsion</th><th class="n">kW</th><th class="n">Engines</th></tr></thead><tbody>
+    ${lines.map(l => { const v = l.vessel || {}; return `<tr><td>${esc(v.owner)}</td><td>${esc(l.role)}</td><td>${esc(v.name)}</td><td>${esc(v.reg)}</td><td>${fmtDate(l.first)}</td><td>${fmtDate(l.last)}</td><td class="n"><b>${l.days}</b></td><td>${l.status}</td><td>${OPS[l.op]}</td><td>${esc(l.duty)}</td><td class="n">${v.len ?? ''}</td><td>${esc(PROP[v.prop] || v.prop)}</td><td class="n">${v.kw ?? ''}</td><td class="n">${v.eng ?? ''}</td></tr>`; }).join('')}
     </tbody></table>
     <p><b>Total:</b> ${tot.daysUW} day(s) underway / at anchor with watch kept; ${tot.daysNU} day(s) not underway (AMSA limits not-underway time to 15% of the service required for a deck certificate, 33% for engineering). Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.</p>
     <h2>3. Duty record</h2>
-    <table><thead><tr><th>#</th><th>Vessel</th><th>Start</th><th>End</th><th class="n">Hours</th><th>Position</th><th>Duty</th><th>Operation</th><th>Status</th><th>From</th><th>To</th><th>Task</th><th>Supervisor / master</th><th>Remarks</th></tr></thead><tbody>
-    ${list.map((e, i) => { const v = vesselOf(e.vesselId); return `<tr><td>${i + 1}</td><td>${esc(v ? v.name : '')}</td><td>${fmtDT(e.start)}</td><td>${fmtDT(e.end)}</td><td class="n">${fmtH(entryHours(e))}</td><td>${esc(e.role)}</td><td>${esc(e.duty || 'D')}</td><td>${OPS[e.op || 'C']}</td><td>${e.status === 'nu' ? 'Not underway' : 'Underway'}</td><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.activity)}</td><td>${esc(e.master)}</td><td>${esc(e.remarks)}</td></tr>`; }).join('')}
+    <table><thead><tr><th>#</th><th>Vessel</th><th>Start</th><th>End</th><th class="n">Hours</th><th>Position</th><th>Duty</th><th>Operation</th><th>Mode</th><th>From</th><th>To</th><th>Task</th><th>Supervisor / master</th><th>Remarks</th></tr></thead><tbody>
+    ${list.map((e, i) => { const v = vesselOf(e.vesselId); return `<tr><td>${i + 1}</td><td>${esc(v ? v.name : '')}</td><td>${fmtDT(e.start)}</td><td>${fmtDT(e.end)}</td><td class="n">${fmtH(entryHours(e))}</td><td>${esc(e.role)}</td><td>${esc(e.duty || 'D')}</td><td>${OPS[e.op || 'C']}</td><td>${modeOf(e)}</td><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.activity)}</td><td>${esc(e.master)}</td><td>${esc(e.remarks)}</td></tr>`; }).join('')}
     </tbody></table>
     <h2>4. Declaration</h2>
     <p>Applicant: I declare the sea service above is true and correct.</p>
@@ -551,27 +548,27 @@ function sheets771(list, lines, p) {
   const dash = v => (v === '' || v == null) ? '&nbsp;' : esc(v);
   return lines.map((l, i) => {
     const v = l.vessel || {};
-    const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && (e.status === 'nu' ? 'nu' : 'uw') === l.status);
+    const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && modeOf(e) === l.status);
     const dates = {};
     es.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => dates[k] = (dates[k] || 0) + h));
     const dateList = Object.keys(dates).sort().map(k => `${fmtDate(k)} (${fmtH(dates[k])} h)`).join(', ');
     return `<div class="sheet771">
-      <h1>Record of Sea Service (Form 771 data sheet) <span style="font-weight:normal;font-size:12px">– sheet ${i + 1} of ${lines.length}</span></h1>
-      <div style="font-size:10px">Near coastal certificates. One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work.</div>
+      <h1>Near Coastal Sea Service Record (AMSA 771 data sheet) <span style="font-weight:normal;font-size:12px">– sheet ${i + 1} of ${lines.length}</span></h1>
+      <div style="font-size:10px">Follows AMSA form 771 (version 2, 11/22). One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work. Lodge with AMSA form 426.</div>
       <h2>Seafarer / applicant details</h2>
       <table><tr><th>Name</th><td>${dash(p.name)}</td><th>Date of birth</th><td>${p.dob ? fmtDate(p.dob) : '&nbsp;'}</td><th>Phone / email</th><td>${dash(p.contact)}</td></tr></table>
       <h2>Operational and vessel details</h2>
       <table>
         <tr><th>Company / business name</th><td>${dash(v.owner)}</td><th>Position on board</th><td>${dash(l.role)}</td><th>Vessel name</th><td>${dash(v.name)}</td><th>Unique vessel identifier / IMO no.</th><td>${dash(v.reg)}</td></tr>
-        <tr><th>Start date</th><td>${fmtDate(l.first)}</td><th>End date</th><td>${fmtDate(l.last)}</td><th>Number of days (8 hrs)</th><td><b>${l.days}</b></td><th>Area of operation</th><td>${dash(v.area)}</td></tr>
-        <tr><th>Type of operation</th><td>${OPS[l.op]}</td><th>Duties</th><td>${esc(l.duty)}</td><th>Measured length (m)</th><td>${dash(v.len)}</td><th>Propulsion type</th><td>${dash(v.prop)}</td></tr>
-        <tr><th>Propulsion power (kW)</th><td>${dash(v.kw)}</td><th>No. of propulsion engines</th><td>${dash(v.eng)}</td><th colspan="2">Vessel status</th><td colspan="2">${l.status === 'nu' ? '<b>Not underway</b> – counts toward the 15% (deck) / 33% (engineering) cap' : 'Underway / at anchor with watch kept'}</td></tr>
+        <tr><th>Start date</th><td>${fmtDate(l.first)}</td><th>End date</th><td>${fmtDate(l.last)}</td><th>Number of days (8 hrs)</th><td><b>${l.days}</b></td><th>Mode of operation (1)</th><td><b>${l.status}</b> – ${MODES[l.status]}</td></tr>
+        <tr><th>Type of operation (2)</th><td>${OPS[l.op]}</td><th>Duties performed (3)</th><td>${esc(l.duty)}</td><th>Measured length (m)</th><td>${dash(v.len)}</td><th>Propulsion (4)</th><td>${dash(PROP[v.prop] || v.prop)}</td></tr>
+        <tr><th>COS/NS propulsion power (kW)</th><td>${dash(v.kw)}</td><th>No. of propulsion engines</th><td>${dash(v.eng)}</td><th colspan="2">Note</th><td colspan="2">${l.status === 'VU' ? '&nbsp;' : 'Not-underway time counts toward AMSA\u2019s 15% (deck) / 33% (engineering) cap'}</td></tr>
       </table>
       <p style="font-size:10px"><b>Dates and hours worked:</b> ${dateList}</p>
       <div class="sigrow"><div>Applicant signature</div><div>Date</div></div>
       <h2>Supervisor details</h2>
       <table>
-        <tr><th>Supervisor name</th><td style="height:22px"></td><th>Position</th><td></td></tr>
+        <tr><th>Supervisor name</th><td style="height:22px"></td><th>Position (job title)</th><td></td></tr>
         <tr><th>Email</th><td style="height:22px"></td><th>Phone</th><td></td></tr>
         <tr><th>Certificate of competency held</th><td style="height:22px"></td><th>Role</th><td>☐ Master in charge &nbsp; ☐ Engineer in charge &nbsp; ☐ Owner &nbsp; ☐ Other</td></tr>
       </table>

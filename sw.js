@@ -1,6 +1,6 @@
 // Logbook app shell: network-first, falls back to cache when offline.
 // User data lives in localStorage on the device, never in this cache.
-const CACHE_NAME = 'logbook-v1';
+const CACHE_NAME = 'logbook-v2';
 const SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {

@@ -10,4 +10,4 @@ A simple offline-capable PWA for recording crew hours and sea service on near co
 
 Run locally: `python3 -m http.server` and open `http://localhost:8000/`.
 
-Always check current requirements on amsa.gov.au; area/duty codes and the 771 layout should be confirmed against the current AMSA form.
+Fields and codes follow AMSA form 771 version 2 (11/22): mode of operation VU/NUD/NUE, type of operation C/R/M, duty codes, propulsion I/O/S. Always confirm against the current form on amsa.gov.au.
