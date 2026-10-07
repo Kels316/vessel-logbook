@@ -144,6 +144,17 @@ td.n, th.n { text-align: right; }
       <p class="note">Per AMSA near coastal rules: one day of sea service = 8 hours of work relevant to the certificate. Shifts shorter than 8 hours are added together until they reach 8 hours; more than 8 hours in a 24-hour period still counts as one day only. Time when the vessel is not underway (and not at anchor with someone on watch) is counted separately because AMSA caps it at 15% of the service required for a deck certificate (33% for engineering).</p>
     </div>
     <div class="card">
+      <h2>Import from spreadsheet</h2>
+      <p class="note">Bring in past records from Excel (.xlsx, .xls) or CSV. You choose which of your columns match which logbook fields, then check a preview before anything is added.</p>
+      <div class="actions">
+        <button class="btn" id="btnImport">Choose spreadsheet…</button>
+        <button class="btn sec" id="btnTemplate">Download template (CSV)</button>
+        <button class="btn danger hidden" id="btnUndoImport">Undo last import</button>
+        <input type="file" id="fileImport" accept=".xlsx,.xls,.csv,text/csv" class="hidden">
+      </div>
+      <p class="note">Excel files need an internet connection the first time to load the reader. CSV works offline.</p>
+    </div>
+    <div class="card">
       <h2>Backup</h2>
       <p class="note">Data is stored only on this device. If you clear browser data or lose the device it is gone, so export a backup regularly.</p>
       <div class="actions">
@@ -238,6 +249,17 @@ td.n, th.n { text-align: right; }
       <button type="button" class="btn" id="vSave">Save</button>
       <button type="button" class="btn sec" id="vCancel">Cancel</button>
       <button type="button" class="btn danger hidden" id="vDelete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgImport">
+  <form method="dialog" novalidate style="max-height:88vh;overflow:auto">
+    <h2>Import spreadsheet</h2>
+    <div id="impBody"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="impGo" disabled>Import</button>
+      <button type="button" class="btn sec" id="impCancel">Cancel</button>
     </div>
   </form>
 </dialog>
@@ -611,8 +633,216 @@ $('fileRestore').onchange = async ev => {
   } catch (e) { alert('Could not import: ' + e.message); }
 };
 
+// ── Spreadsheet import ───────────────────────────────────
+const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+const XLSX_SRI = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const el = document.createElement('script');
+    el.src = XLSX_SRC; el.integrity = XLSX_SRI; el.crossOrigin = 'anonymous';
+    el.onload = ok; el.onerror = () => fail(new Error('Could not load the Excel reader (are you online?). Save the sheet as CSV and try again.'));
+    document.head.appendChild(el);
+  });
+}
+function parseCSV(text) {
+  const rows = []; let row = [], f = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+// Excel serial/real dates → {y,m,d}; strings are read day-first (d/m/yyyy) as is usual in Australia
+const hasDatePart = v => (typeof v === 'number' && v >= 1) || (typeof v === 'string' && /\d{1,4}[\/.-]\d{1,2}[\/.-]\d{1,4}/.test(v));
+function parseDate(v) {
+  if (v instanceof Date) return { y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate() };
+  if (typeof v === 'number') { if (v < 1) return null; const t = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 864e5); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() }; }
+  if (typeof v !== 'string') return null;
+  let m = v.match(/(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return { y: +m[1], m: +m[2], d: +m[3] };
+  m = v.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m) { let y = +m[3]; if (y < 100) y += 2000; if (+m[2] > 12 || +m[2] < 1 || +m[1] > 31) return null; return { y, m: +m[2], d: +m[1] }; }
+  return null;
+}
+function parseTime(v) {   // → minutes since midnight
+  if (v instanceof Date) return v.getHours() * 60 + v.getMinutes();
+  if (typeof v === 'number') { const fr = v - Math.floor(v); return Math.round(fr * 1440) % 1440; }
+  if (typeof v !== 'string') return null;
+  v = v.trim();
+  let m = v.match(/(\d{1,2})[:.hH](\d{2})\s*(am|pm)?/i) || v.match(/^(\d{1,2})()\s*(am|pm)$/i) || v.match(/^(\d{2})(\d{2})()$/);
+  if (!m) return null;
+  let h = +m[1], mi = +(m[2] || 0); const ap = (m[3] || '').toLowerCase();
+  if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0;
+  return h < 24 && mi < 60 ? h * 60 + mi : null;
+}
+const toIso = (dt, min) => { const t = new Date(Date.UTC(dt.y, dt.m - 1, dt.d, 0, min)); return `${t.getUTCFullYear()}-${p2(t.getUTCMonth() + 1)}-${p2(t.getUTCDate())}T${p2(t.getUTCHours())}:${p2(t.getUTCMinutes())}`; };
+
+const IMP_FIELDS = [
+  ['date', 'Date', /^date|^day$/i], ['start', 'Start time', /start|depart|begin|time (on|out)|sign.?on|^from time/i],
+  ['end', 'End time', /\bend|arriv|finish|time (off|in)|sign.?off|return/i], ['hours', 'Hours (if no end time)', /hour|hrs|duration/i],
+  ['vessel', 'Vessel', /vessel|boat|ship/i], ['role', 'Position', /position|role|capacity|rank/i],
+  ['duty', 'Duty code', /dut(y|ies)/i], ['op', 'Type of operation', /operation|type/i],
+  ['mode', 'Mode (VU/NUD/NUE)', /mode|status|underway/i], ['from', 'From', /^(from|origin|dep\w* (port|loc|point))/i],
+  ['to', 'To', /^(to|destination|arr\w* (port|loc|point))/i], ['activity', 'Task / activity', /task|activity|purpose|job/i],
+  ['master', 'Supervisor / master', /supervisor|master|skipper/i], ['remarks', 'Remarks', /remark|note|comment|weather/i]
+];
+const DUTIES = ['D', 'INW', 'C', 'GPH', 'DE', 'E', 'AE', 'EW', 'EIC', 'AEIC'];
+let imp = null;   // { headers, rows, map }
+
+function startImport(file) {
+  const done = (sheets) => {
+    const names = Object.keys(sheets);
+    imp = { sheets, sheet: names[0], file: file.name };
+    buildImportUI();
+    $('dlgImport').showModal();
+  };
+  const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+  const rd = new FileReader();
+  rd.onerror = () => alert('Could not read that file.');
+  if (isCsv) {
+    rd.onload = () => done({ [file.name]: parseCSV(rd.result) });
+    rd.readAsText(file);
+  } else {
+    rd.onload = async () => {
+      try {
+        await loadXlsx();
+        const wb = XLSX.read(rd.result, { type: 'array' });
+        const sheets = {};
+        wb.SheetNames.forEach(n => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '', blankrows: false }); });
+        done(sheets);
+      } catch (e) { alert(e.message || 'Could not read that spreadsheet.'); }
+    };
+    rd.readAsArrayBuffer(file);
+  }
+}
+function buildImportUI() {
+  const rows = imp.sheets[imp.sheet].filter(r => r.some(c => String(c).trim() !== ''));
+  imp.headers = (rows[0] || []).map((h, i) => String(h).trim() || `Column ${i + 1}`);
+  imp.rows = rows.slice(1);
+  imp.map = {}; const used = new Set();
+  IMP_FIELDS.forEach(([k, , rx]) => {
+    const i = imp.headers.findIndex((h, ix) => !used.has(ix) && rx.test(h));
+    if (i >= 0) { imp.map[k] = i; used.add(i); }
+  });
+  const opts = sel => '<option value="">— none —</option>' + imp.headers.map((h, i) => `<option value="${i}"${sel === i ? ' selected' : ''}>${esc(h)}</option>`).join('');
+  const sheetNames = Object.keys(imp.sheets);
+  $('impBody').innerHTML = `
+    <p class="note">${esc(imp.file)} · ${imp.rows.length} data rows (first row is read as column headings).</p>
+    ${sheetNames.length > 1 ? `<label>Sheet</label><select id="impSheet">${sheetNames.map(n => `<option${n === imp.sheet ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
+    <h2 style="font-size:15px;margin-top:12px">Match your columns</h2>
+    <div class="row">${IMP_FIELDS.map(([k, label]) => `<div><label>${label}</label><select data-map="${k}">${opts(imp.map[k])}</select></div>`).join('')}</div>
+    <h2 style="font-size:15px;margin-top:12px">Defaults (used when a column is empty or not matched)</h2>
+    <div class="row">
+      <div><label>Vessel</label><select id="impVessel"><option value="">— choose —</option>${S.vessels.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></div>
+      <div><label>Position</label><select id="impRole"><option>Master</option><option>Mate</option><option selected>Coxswain</option><option>GPH</option><option>Engineer</option><option>Other</option></select></div>
+      <div><label>Duty code</label><select id="impDuty">${DUTIES.map(d => `<option${d === S.settings.lastDuty ? ' selected' : ''}>${d}</option>`).join('')}</select></div>
+      <div><label>Type of operation</label><select id="impOp"><option value="C">Commercial</option><option value="R">Recreational</option><option value="M">Military</option></select></div>
+      <div><label>Mode</label><select id="impMode"><option>VU</option><option>NUD</option><option>NUE</option></select></div>
+      <div><label>Start time if none</label><input type="time" id="impStart" value="08:00"></div>
+    </div>
+    <p class="note">Dates are read day-first (e.g. 18/11/2017). If a row has a start and end time on the same date and the end is earlier, it is treated as finishing the next day. Vessel names not already in the app are added as new vessels (fill in their details afterwards on the Vessels tab).</p>
+    <div id="impPreview"></div>`;
+  if (imp.sheetEl = $('impSheet')) imp.sheetEl.onchange = () => { imp.sheet = imp.sheetEl.value; buildImportUI(); };
+  $('impBody').querySelectorAll('[data-map]').forEach(el => el.onchange = () => { imp.map[el.dataset.map] = el.value === '' ? undefined : +el.value; runPreview(); });
+  ['impVessel', 'impRole', 'impDuty', 'impOp', 'impMode', 'impStart'].forEach(id => $(id).onchange = runPreview);
+  runPreview();
+}
+function convertRows() {
+  const m = imp.map, cell = (r, k) => (m[k] == null ? '' : r[m[k]]);
+  const def = { role: $('impRole').value, duty: $('impDuty').value, op: $('impOp').value, mode: $('impMode').value, vessel: $('impVessel').value };
+  const [dh, dm] = ($('impStart').value || '08:00').split(':').map(Number);
+  const good = [], bad = [];
+  imp.rows.forEach((r, i) => {
+    const line = i + 2, fail = why => bad.push(`Row ${line}: ${why}`);
+    const sd = parseDate(cell(r, 'date')) || parseDate(cell(r, 'start'));
+    if (!sd) return fail('no valid date');
+    let sm = m.start == null || String(cell(r, 'start')).trim() === '' ? null : parseTime(cell(r, 'start'));
+    if (sm == null) sm = dh * 60 + dm;
+    let ed = sd, em;
+    const endCell = cell(r, 'end'), hrs = parseFloat(String(cell(r, 'hours')).replace(',', '.'));
+    if (m.end != null && String(endCell).trim() !== '' && parseTime(endCell) != null) {
+      if (hasDatePart(endCell) && parseDate(endCell)) ed = parseDate(endCell);
+      em = parseTime(endCell);
+    } else if (hrs > 0) { em = sm + Math.round(hrs * 60); }
+    else return fail('no end time or hours');
+    let startIso = toIso(sd, sm), endIso = toIso(ed, em);
+    if (endIso <= startIso && ed === sd) endIso = toIso(ed, em + 1440);
+    if (endIso <= startIso) return fail('end is not after start');
+    const vName = String(cell(r, 'vessel')).trim();
+    if (!vName && !def.vessel) return fail('no vessel (choose a default vessel)');
+    let duty = String(cell(r, 'duty')).trim().toUpperCase(); if (!DUTIES.includes(duty)) duty = def.duty;
+    let op = String(cell(r, 'op')).trim().charAt(0).toUpperCase(); if (!'CRM'.includes(op) || !op) op = def.op;
+    const mt = String(cell(r, 'mode')).trim().toUpperCase();
+    const mode = /NUE|ENGINE/.test(mt) ? 'NUE' : /NUD|NOT UNDERWAY|REFIT|ALONGSIDE/.test(mt) ? 'NUD' : /VU|UNDERWAY/.test(mt) ? 'VU' : def.mode;
+    good.push({
+      vName, start: startIso, end: endIso, role: String(cell(r, 'role')).trim() || def.role, duty, op, status: mode,
+      from: String(cell(r, 'from')).trim(), to: String(cell(r, 'to')).trim(), activity: String(cell(r, 'activity')).trim(),
+      master: String(cell(r, 'master')).trim(), remarks: String(cell(r, 'remarks')).trim()
+    });
+  });
+  return { good, bad, def };
+}
+function runPreview() {
+  const { good, bad, def } = convertRows();
+  const known = n => S.vessels.find(v => v.name.toLowerCase() === n.toLowerCase());
+  const newV = [...new Set(good.map(g => g.vName).filter(n => n && !known(n)))];
+  const dupe = g => { const v = g.vName ? known(g.vName) : vesselOf(def.vessel); return v && S.entries.some(e => e.vesselId === v.id && e.start === g.start && e.end === g.end); };
+  const seen = new Set();
+  const fresh = good.filter(g => { const k = (g.vName || def.vessel).toLowerCase() + g.start + g.end; if (seen.has(k)) return false; seen.add(k); return !dupe(g); });
+  imp.ready = fresh;
+  const hrs = fresh.reduce((s, g) => s + hoursBetween(g.start, g.end), 0);
+  $('impPreview').innerHTML = `
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><b>${fresh.length}</b><span>entries to import</span></div>
+      <div class="stat"><b>${fmtH(hrs)}</b><span>hours</span></div>
+      <div class="stat"><b>${good.length - fresh.length}</b><span>duplicates skipped</span></div>
+      <div class="stat"><b>${bad.length}</b><span>rows skipped</span></div></div>
+    ${newV.length ? `<p class="note">New vessels to be created: ${newV.map(esc).join(', ')}</p>` : ''}
+    ${fresh.length ? `<table style="margin-top:8px"><thead><tr><th>Start</th><th>End</th><th>Vessel</th><th>Position</th><th>Duty</th><th class="n">Hrs</th></tr></thead><tbody>
+      ${fresh.slice(0, 5).map(g => `<tr><td>${fmtDT(g.start)}</td><td>${fmtDT(g.end)}</td><td>${esc(g.vName || (vesselOf(def.vessel) || {}).name)}</td><td>${esc(g.role)}</td><td>${g.duty}</td><td class="n">${fmtH(hoursBetween(g.start, g.end))}</td></tr>`).join('')}
+      </tbody></table>${fresh.length > 5 ? `<p class="note">…and ${fresh.length - 5} more</p>` : ''}` : ''}
+    ${bad.length ? `<div class="warn"><b>Skipped:</b><br>${bad.slice(0, 8).map(esc).join('<br>')}${bad.length > 8 ? `<br>…and ${bad.length - 8} more` : ''}</div>` : ''}`;
+  $('impGo').disabled = !fresh.length;
+}
+$('impGo').onclick = () => {
+  const { def } = convertRows();
+  const addedV = [], addedE = [];
+  imp.ready.forEach(g => {
+    let v = g.vName ? S.vessels.find(x => x.name.toLowerCase() === g.vName.toLowerCase()) : vesselOf(def.vessel);
+    if (!v) { v = { id: uid(), name: g.vName }; S.vessels.push(v); addedV.push(v.id); }
+    const { vName, ...rest } = g;
+    const e = { id: uid(), vesselId: v.id, ...rest };
+    S.entries.push(e); addedE.push(e.id);
+  });
+  S.lastImport = { entries: addedE, vessels: addedV };
+  save(); $('dlgImport').close(); init();
+  alert(`Imported ${addedE.length} entries${addedV.length ? ` and ${addedV.length} new vessel(s)` : ''}. Check the Vessels tab to complete vessel details (identifier, length, propulsion).`);
+};
+$('impCancel').onclick = () => $('dlgImport').close();
+$('btnImport').onclick = () => $('fileImport').click();
+$('fileImport').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) startImport(f); };
+$('btnTemplate').onclick = () => {
+  const csv = 'Date,Start time,End time,Vessel,Position,Duty,Operation,Mode,From,To,Task,Supervisor,Remarks\n18/11/2017,07:25,09:30,Savage Scorpion,Coxswain,C,Commercial,VU,Mulwala NSW,Mulwala NSW,Vessel testing,Adam Kelly,Test run\n';
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'logbook-import-template.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('btnUndoImport').onclick = () => {
+  const li = S.lastImport; if (!li) return;
+  if (!confirm(`Remove the ${li.entries.length} entries (and ${li.vessels.length} vessels) added by the last import?`)) return;
+  S.entries = S.entries.filter(e => !li.entries.includes(e.id));
+  S.vessels = S.vessels.filter(v => !li.vessels.includes(v.id) || S.entries.some(e => e.vesselId === v.id));
+  delete S.lastImport; save(); init();
+};
+
 // ── Init ─────────────────────────────────────────────────
 function init() {
+  $('btnUndoImport').classList.toggle('hidden', !(S.lastImport && S.lastImport.entries.length));
   renderSettings(); renderVessels(); renderLog();
   $('xFrom').dataset.init = '';
 }
