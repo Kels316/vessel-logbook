@@ -130,7 +130,7 @@ td.n, th.n { text-align: right; }
       <label>Full name</label><input id="pName" autocomplete="name">
       <div class="row">
         <div><label>AMSA client no. (if known)</label><input id="pId"></div>
-        <div><label>Certificate held / sought</label><input id="pCert" placeholder="e.g. Coxswain, Master &lt; 24m NC"></div>
+        <div><label>Certificate / exemption (optional)</label><input id="pCert" placeholder="e.g. Coxswain Grade 1 NC, Exemption 38"></div>
       </div>
       <div class="row">
         <div><label>Date of birth</label><input type="date" id="pDob"></div>
@@ -517,7 +517,7 @@ function runExport(kind) {
     <div class="pmeta">
       <div><b>Name:</b> ${dash(p.name)}</div><div><b>Date of birth:</b> ${p.dob ? fmtDate(p.dob) : '—'}</div>
       <div><b>Phone / email:</b> ${dash(p.contact)}</div><div><b>AMSA client no.:</b> ${dash(p.id)}</div>
-      <div><b>Certificate sought:</b> ${dash(p.cert)}</div>
+      ${p.cert ? `<div><b>Certificate / exemption:</b> ${esc(p.cert)}</div>` : ''}
       <div><b>Period:</b> ${fmtDate(list[0].start)} to ${fmtDate(list[list.length - 1].end)}</div>
     </div>
     <h2>2. Sea service summary (1 day = 8 hours of work)</h2>
