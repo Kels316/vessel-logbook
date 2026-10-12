@@ -64,7 +64,7 @@ td.n, th.n { text-align: right; }
 /* ---------- PDF / print output ---------- */
 #printArea { display: none; }
 @media print {
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 landscape; margin: 12mm 12mm 16mm; @top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } @bottom-left { content: ""; } @bottom-right { content: ""; } @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 10px -apple-system, Helvetica, Arial, sans-serif; color: #000; } }
   body { background: #fff; padding: 0; font-size: 11px; }
   header, nav, main, dialog { display: none !important; }
   #printArea { display: block; color: #000; }
@@ -536,7 +536,7 @@ function runExport(kind) {
   if (kind === '771') { $('printArea').innerHTML = sheets771(list, lines, p); window.print(); return; }
   $('printArea').innerHTML = `
     <h1>Record of Sea Service – Near Coastal</h1>
-    <div>Prepared ${fmtDT(toLocalInput(new Date()))} from the applicant's digital vessel logbook. Supporting record for completion of AMSA Record of sea service (form 771); one 771 is needed per line in section 2.</div>
+    <div><b>Exported on ${fmtDate(toLocalInput(new Date()))} at ${fmtTime(toLocalInput(new Date()))}</b> from the applicant's digital vessel logbook. Supporting record for completion of AMSA Record of sea service (form 771); one 771 is needed per line in section 2.</div>
     <h2>1. Applicant</h2>
     <div class="pmeta">
       <div><b>Name:</b> ${dash(p.name)}</div><div><b>Date of birth:</b> ${p.dob ? fmtDate(p.dob) : '—'}</div>
@@ -597,7 +597,7 @@ function sheets771(list, lines, p) {
         <tr><th>Certificate of competency held</th><td style="height:22px"></td><th>Role</th><td>☐ Master in charge &nbsp; ☐ Engineer in charge &nbsp; ☐ Owner &nbsp; ☐ Other</td></tr>
       </table>
       <div class="sigrow"><div>Supervisor signature (handwritten or electronic – typed names are not accepted)</div><div>Date</div></div>
-      <p style="font-size:9px;margin-top:14px">Generated ${fmtDT(toLocalInput(new Date()))} from the applicant's digital logbook. This sheet carries the details for AMSA form 771 and is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. Any amendments must be signed and dated by the supervisor.</p>
+      <p style="font-size:9px;margin-top:14px">Exported on ${fmtDate(toLocalInput(new Date()))} at ${fmtTime(toLocalInput(new Date()))} from the applicant's digital logbook. This sheet carries the details for AMSA form 771 and is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. Any amendments must be signed and dated by the supervisor.</p>
     </div>`;
   }).join('');
 }
