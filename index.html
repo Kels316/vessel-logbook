@@ -61,28 +61,6 @@ th { background: #eef2f5; }
 td.n, th.n { text-align: right; }
 .hidden { display: none !important; }
 
-/* ---------- PDF / print output ---------- */
-#printArea { display: none; }
-@media print {
-  @page { size: A4 landscape; margin: 12mm 12mm 16mm; @top-left { content: ""; } @top-center { content: ""; } @top-right { content: ""; } @bottom-left { content: ""; } @bottom-right { content: ""; } @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 10px -apple-system, Helvetica, Arial, sans-serif; color: #000; } }
-  body { background: #fff; padding: 0; font-size: 11px; }
-  header, nav, main, dialog { display: none !important; }
-  #printArea { display: block; color: #000; }
-  #printArea h1 { font-size: 18px; margin: 0 0 2px; }
-  #printArea h2 { font-size: 13px; margin: 14px 0 4px; }
-  #printArea table { font-size: 10px; line-height: 1.4; }
-  #printArea th, #printArea td { padding: 5px 6px 8px; overflow-wrap: break-word; vertical-align: top; }
-  #printArea h2 { page-break-after: avoid; }
-  #printArea th { background: #e8e8e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  #printArea tr { page-break-inside: avoid; }
-  #printArea thead { display: table-header-group; }
-  .sheet771 { page-break-after: always; }
-  .sheet771:last-child { page-break-after: auto; }
-  .sheet771 th { width: 1%; white-space: nowrap; }
-  .sigrow { display: flex; gap: 30px; margin-top: 26px; page-break-inside: avoid; }
-  .sigrow div { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 10px; }
-}
-.pmeta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px 20px; margin: 6px 0; }
 </style>
 </head>
 <body>
@@ -121,7 +99,7 @@ td.n, th.n { text-align: right; }
       <div id="xPreview" style="margin-top:12px"></div>
       <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button></div>
       <div class="warn"><b>Check with AMSA:</b> for near coastal certificates AMSA accepts a Record of sea service (form 771), its sea service letter template signed by a supervisor/operator/owner/master/chief engineer, or an AMSA-approved task book. A logbook PDF is not on that list by itself. <b>Form 771 sheets</b> gives one page per vessel / duty / operation type with the details to transfer onto (or attach to) AMSA\u2019s official form 771 for your supervisor to sign. The <b>Logbook PDF</b> is the full record as supporting evidence.</div>
-      <p class="note">Opens the print dialog. Choose <b>Save as PDF</b> (on iPhone/iPad: share icon → Save to Files; on Android: Save as PDF). The report includes blank lines for the Master / owner to sign and date.</p>
+      <p class="note">Creates a PDF file and downloads it (on iPhone/iPad it opens in the viewer, then use the share icon → Save to Files). Includes blank lines for you and your supervisor to sign and date. The PDF library downloads once, then works offline.</p>
     </div>
   </section>
 
@@ -263,8 +241,6 @@ td.n, th.n { text-align: right; }
     </div>
   </form>
 </dialog>
-
-<div id="printArea"></div>
 
 <script>
 'use strict';
@@ -526,81 +502,152 @@ function updateExportPreview() {
 ['xFrom', 'xTo', 'xVessel'].forEach(id => $(id).onchange = updateExportPreview);
 const OPS = { C: 'Commercial', R: 'Recreational', M: 'Military' };
 
-function runExport(kind) {
-  const list = filtered();
-  if (!list.length) return alert('No completed entries in that range.');
-  if (!S.profile.name && !confirm('Your name is blank (Settings tab). Create the report anyway?')) return;
-  const p = S.profile, lines = groupLines(list), tot = summarise(list);
-  const vessels = [...new Set(list.map(e => e.vesselId))].map(vesselOf).filter(Boolean);
-  const dash = v => (v === '' || v == null) ? '—' : esc(v);
-  if (kind === '771') { $('printArea').innerHTML = sheets771(list, lines, p); window.print(); return; }
-  $('printArea').innerHTML = `
-    <h1>Record of Sea Service – Near Coastal</h1>
-    <div><b>Exported on ${fmtDate(toLocalInput(new Date()))} at ${fmtTime(toLocalInput(new Date()))}</b> from the applicant's digital vessel logbook. Supporting record for completion of AMSA Record of sea service (form 771); one 771 is needed per line in section 2.</div>
-    <h2>1. Applicant</h2>
-    <div class="pmeta">
-      <div><b>Name:</b> ${dash(p.name)}</div><div><b>Date of birth:</b> ${p.dob ? fmtDate(p.dob) : '—'}</div>
-      <div><b>Phone / email:</b> ${dash(p.contact)}</div><div><b>AMSA client no.:</b> ${dash(p.id)}</div>
-      ${p.cert ? `<div><b>Certificate / exemption:</b> ${esc(p.cert)}</div>` : ''}
-      <div><b>Period:</b> ${fmtDate(list[0].start)} to ${fmtDate(list[list.length - 1].end)}</div>
-    </div>
-    <h2>2. Sea service summary (1 day = 8 hours of work)</h2>
-    <table><thead><tr><th>Company / business</th><th>Position</th><th>Vessel</th><th>Unique vessel ID / IMO</th><th>Start date</th><th>End date</th><th class="n">Days (8 h)</th><th>Mode</th><th>Operation</th><th>Duty</th><th class="n">Length (m)</th><th>Propulsion</th><th class="n">kW</th><th class="n">Engines</th></tr></thead><tbody>
-    ${lines.map(l => { const v = l.vessel || {}; return `<tr><td>${esc(v.owner)}</td><td>${esc(l.role)}</td><td>${esc(v.name)}</td><td>${esc(v.reg)}</td><td>${fmtDate(l.first)}</td><td>${fmtDate(l.last)}</td><td class="n"><b>${l.days}</b></td><td>${l.status}</td><td>${OPS[l.op]}</td><td>${esc(l.duty)}</td><td class="n">${v.len ?? ''}</td><td>${esc(PROP[v.prop] || v.prop)}</td><td class="n">${v.kw ?? ''}</td><td class="n">${v.eng ?? ''}</td></tr>`; }).join('')}
-    </tbody></table>
-    <p><b>Total:</b> ${tot.daysUW} day(s) underway / at anchor with watch kept; ${tot.daysNU} day(s) not underway (AMSA limits not-underway time to 15% of the service required for a deck certificate, 33% for engineering). Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.</p>
-    <h2>3. Duty record</h2>
-    <table><thead><tr><th>#</th><th>Vessel</th><th>Start</th><th>End</th><th class="n">Hours</th><th>Position</th><th>Duty</th><th>Operation</th><th>Mode</th><th>From</th><th>To</th><th>Task</th><th>Supervisor / master</th><th>Remarks</th></tr></thead><tbody>
-    ${list.map((e, i) => { const v = vesselOf(e.vesselId); return `<tr><td>${i + 1}</td><td>${esc(v ? v.name : '')}</td><td>${fmtDT(e.start)}</td><td>${fmtDT(e.end)}</td><td class="n">${fmtH(entryHours(e))}</td><td>${esc(e.role)}</td><td>${esc(e.duty || 'D')}</td><td>${OPS[e.op || 'C']}</td><td>${modeOf(e)}</td><td>${esc(e.from)}</td><td>${esc(e.to)}</td><td>${esc(e.activity)}</td><td>${esc(e.master)}</td><td>${esc(e.remarks)}</td></tr>`; }).join('')}
-    </tbody></table>
-    <h2>4. Declaration</h2>
-    <p>Applicant: I declare the sea service above is true and correct.</p>
-    <div class="sigrow"><div>Applicant signature</div><div>Date</div></div>
-    <p>Supervisor: I confirm the applicant served in the capacity and for the periods recorded above.</p>
-    <div class="pmeta" style="margin-top:10px">
-      <div>Supervisor name: ______________________________</div><div>Position / role (Master in charge, Engineer in charge, Owner, Other): ____________________</div>
-      <div>Certificate of competency held: ______________________</div><div>Email / phone: ______________________________</div>
-    </div>
-    <div class="sigrow"><div>Supervisor signature (handwritten or electronic; typed names are not accepted by AMSA)</div><div>Date</div></div>`;
-  window.print();
+const JSPDF_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+const JSPDF_SRI = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
+const ATBL_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+const ATBL_SRI = 'sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3';
+async function loadPdfLib() {
+  if (!window.jspdf) await loadScript(JSPDF_SRC, JSPDF_SRI);
+  if (!window.jspdf.jsPDF.API.autoTable) await loadScript(ATBL_SRC, ATBL_SRI);
 }
-$('btnPdf').onclick = () => runExport('log');
-$('btnPdf771').onclick = () => runExport('771');
+// jsPDF's built-in fonts only cover Latin-1, so swap/replace anything else
+const pt = v => String(v ?? '').replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+  .replace(/…/g, '...').replace(/[^\x09\x0A\x20-\x7E\xA0-\xFF]/g, '?');
+const PW = 297, PH = 210, PM = 12;                 // A4 landscape, mm
+const GRID = { theme: 'grid', styles: { fontSize: 7.5, cellPadding: 1.8, lineColor: [200, 208, 214], lineWidth: 0.15, textColor: 0, valign: 'top', overflow: 'linebreak' },
+  headStyles: { fillColor: [232, 232, 232], textColor: 0, fontStyle: 'bold' }, margin: { left: PM, right: PM, bottom: 18 }, rowPageBreak: 'avoid' };
 
-// One sheet per line of groupLines(): mirrors AMSA form 771 (one vessel, one operation mode, one duty type)
-function sheets771(list, lines, p) {
-  const dash = v => (v === '' || v == null) ? '&nbsp;' : esc(v);
-  return lines.map((l, i) => {
+function pdfKit(doc) {
+  const k = { y: PM + 4 };
+  k.ensure = h => { if (k.y + h > PH - 16) { doc.addPage(); k.y = PM + 4; } };
+  k.title = t => { doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(pt(t), PM, k.y); k.y += 6; };
+  k.heading = t => { k.ensure(14); k.y += 3; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(t), PM, k.y); k.y += 3.5; };
+  k.para = (t, size = 9, bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
+    const ls = doc.splitTextToSize(pt(t), PW - 2 * PM);
+    k.ensure(ls.length * (size * 0.42) + 2);
+    doc.text(ls, PM, k.y + 3); k.y += ls.length * (size * 0.42) + 3;
+  };
+  k.kv = (x, label, value) => {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(pt(label), x, k.y);
+    const w = doc.getTextWidth(pt(label)) + 1.5;
+    doc.setFont('helvetica', 'normal'); doc.text(pt(value || '-'), x + w, k.y);
+  };
+  k.table = opts => { doc.autoTable({ ...GRID, ...opts, startY: k.y, styles: { ...GRID.styles, ...(opts.styles || {}) } }); k.y = doc.lastAutoTable.finalY + 4; };
+  k.sig = (labels) => {            // labelled signature lines side by side
+    k.ensure(20); k.y += 9; doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    const colW = (PW - 2 * PM - 10 * (labels.length - 1)) / labels.length;
+    labels.forEach(([lab, wt], i) => {
+      const tot = labels.reduce((a, l) => a + l[1], 0), w = (PW - 2 * PM - 10 * (labels.length - 1)) * wt / tot;
+      const x = PM + labels.slice(0, i).reduce((a, l) => a + (PW - 2 * PM - 10 * (labels.length - 1)) * l[1] / tot + 10, 0);
+      doc.setDrawColor(0); doc.setLineWidth(0.3); doc.line(x, k.y, x + w, k.y); doc.text(pt(lab), x, k.y + 4);
+    });
+    k.y += 8;
+  };
+  k.field = (x, label, width) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(pt(label), x, k.y);
+    const w = doc.getTextWidth(pt(label)) + 1.5; doc.setDrawColor(0); doc.setLineWidth(0.2); doc.line(x + w, k.y + 0.8, x + width, k.y + 0.8);
+  };
+  k.footers = () => {
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0); doc.text(`Page ${i} of ${n}`, PW / 2, PH - 8, { align: 'center' }); }
+  };
+  return k;
+}
+const newDoc = () => new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+const nowStr = () => { const n = toLocalInput(new Date()); return `${fmtDate(n)} at ${fmtTime(n)}`; };
+
+function buildLogbookPdf(list) {
+  const doc = newDoc(), k = pdfKit(doc), p = S.profile, lines = groupLines(list), tot = summarise(list);
+  k.title('Record of Sea Service - Near Coastal');
+  k.para(`Exported on ${nowStr()}`, 9, true); k.y -= 1;
+  k.para("From the applicant's digital vessel logbook. Supporting record for completion of AMSA Record of sea service (form 771); one 771 is needed per line in section 2.", 8.5);
+  k.heading('1. Applicant'); k.y += 1.5;
+  k.kv(PM, 'Name:', p.name); k.kv(PW / 2, 'Date of birth:', p.dob ? fmtDate(p.dob) : ''); k.y += 5;
+  k.kv(PM, 'Phone / email:', p.contact); k.kv(PW / 2, 'AMSA client no.:', p.id); k.y += 5;
+  if (p.cert) k.kv(PM, 'Certificate / exemption:', p.cert);
+  k.kv(PW / 2, 'Period:', `${fmtDate(list[0].start)} to ${fmtDate(list[list.length - 1].end)}`); k.y += 4;
+  k.heading('2. Sea service summary (1 day = 8 hours of work)');
+  k.table({
+    head: [['Company / business', 'Position', 'Vessel', 'Unique vessel ID / IMO', 'Start date', 'End date', 'Days (8 h)', 'Mode', 'Operation', 'Duty', 'Length (m)', 'Propulsion', 'kW', 'Engines']],
+    body: lines.map(l => { const v = l.vessel || {}; return [v.owner, l.role, v.name, v.reg, fmtDate(l.first), fmtDate(l.last), l.days, l.status, OPS[l.op], l.duty, v.len ?? '', PROP[v.prop] || v.prop || '', v.kw ?? '', v.eng ?? ''].map(pt); }),
+    columnStyles: { 6: { halign: 'right', fontStyle: 'bold' }, 10: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right' } }
+  });
+  k.para(`Total: ${tot.daysUW} day(s) underway (VU); ${tot.daysNU} day(s) not underway (NUD/NUE). AMSA limits not-underway time to 15% of the service required for a deck certificate and 33% for engineering. Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.`, 8);
+  k.heading('3. Duty record');
+  k.table({
+    head: [['#', 'Vessel', 'Start', 'End', 'Hours', 'Position', 'Duty', 'Operation', 'Mode', 'From', 'To', 'Task', 'Supervisor / master', 'Remarks']],
+    body: list.map((e, i) => { const v = vesselOf(e.vesselId); return [i + 1, v ? v.name : '', fmtDT(e.start), fmtDT(e.end), fmtH(entryHours(e)), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), e.from, e.to, e.activity, e.master, e.remarks].map(pt); }),
+    columnStyles: { 2: { minCellWidth: 24 }, 3: { minCellWidth: 24 }, 4: { halign: 'right' } }
+  });
+  k.ensure(75);
+  k.heading('4. Declaration');
+  k.para('Applicant: I declare the sea service above is true and correct.', 9);
+  k.sig([['Applicant signature', 2], ['Date', 1]]);
+  k.para('Supervisor: I confirm the applicant served in the capacity and for the periods recorded above.', 9);
+  k.y += 4; k.field(PM, 'Supervisor name:', 120); k.field(PW / 2, 'Position / role (Master in charge, Engineer in charge, Owner, Other):', PW / 2 - PM); k.y += 7;
+  k.field(PM, 'Certificate of competency held:', 120); k.field(PW / 2, 'Email / phone:', PW / 2 - PM);
+  k.sig([['Supervisor signature (handwritten or electronic; typed names are not accepted by AMSA)', 2], ['Date', 1]]);
+  k.footers();
+  return doc;
+}
+
+// One page per line of groupLines(): mirrors AMSA form 771 (one vessel, one operation mode, one duty type)
+function build771Pdf(list) {
+  const doc = newDoc(), k = pdfKit(doc), p = S.profile, lines = groupLines(list);
+  const lab = d => { if (d.section === 'body' && d.column.index % 2 === 0) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [238, 242, 245]; } };
+  lines.forEach((l, i) => {
+    if (i) { doc.addPage(); k.y = PM + 4; }
     const v = l.vessel || {};
     const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && modeOf(e) === l.status);
     const dates = {};
-    es.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => dates[k] = (dates[k] || 0) + h));
-    const dateList = Object.keys(dates).sort().map(k => `${fmtDate(k)} (${fmtH(dates[k])} h)`).join(', ');
-    return `<div class="sheet771">
-      <h1>Near Coastal Sea Service Record (AMSA 771 data sheet) <span style="font-weight:normal;font-size:12px">– sheet ${i + 1} of ${lines.length}</span></h1>
-      <div style="font-size:10px">Follows AMSA form 771 (version 2, 11/22). One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work. Lodge with AMSA form 426.</div>
-      <h2>Seafarer / applicant details</h2>
-      <table><tr><th>Name</th><td>${dash(p.name)}</td><th>Date of birth</th><td>${p.dob ? fmtDate(p.dob) : '&nbsp;'}</td><th>Phone / email</th><td>${dash(p.contact)}</td></tr></table>
-      <h2>Operational and vessel details</h2>
-      <table>
-        <tr><th>Company / business name</th><td>${dash(v.owner)}</td><th>Position on board</th><td>${dash(l.role)}</td><th>Vessel name</th><td>${dash(v.name)}</td><th>Unique vessel identifier / IMO no.</th><td>${dash(v.reg)}</td></tr>
-        <tr><th>Start date</th><td>${fmtDate(l.first)}</td><th>End date</th><td>${fmtDate(l.last)}</td><th>Number of days (8 hrs)</th><td><b>${l.days}</b></td><th>Mode of operation (1)</th><td><b>${l.status}</b> – ${MODES[l.status]}</td></tr>
-        <tr><th>Type of operation (2)</th><td>${OPS[l.op]}</td><th>Duties performed (3)</th><td>${esc(l.duty)}</td><th>Measured length (m)</th><td>${dash(v.len)}</td><th>Propulsion (4)</th><td>${dash(PROP[v.prop] || v.prop)}</td></tr>
-        <tr><th>COS/NS propulsion power (kW)</th><td>${dash(v.kw)}</td><th>No. of propulsion engines</th><td>${dash(v.eng)}</td><th colspan="2">Note</th><td colspan="2">${l.status === 'VU' ? '&nbsp;' : 'Not-underway time counts toward AMSA\u2019s 15% (deck) / 33% (engineering) cap'}</td></tr>
-      </table>
-      <p style="font-size:10px"><b>Dates and hours worked:</b> ${dateList}</p>
-      <div class="sigrow"><div>Applicant signature</div><div>Date</div></div>
-      <h2>Supervisor details</h2>
-      <table>
-        <tr><th>Supervisor name</th><td style="height:22px"></td><th>Position (job title)</th><td></td></tr>
-        <tr><th>Email</th><td style="height:22px"></td><th>Phone</th><td></td></tr>
-        <tr><th>Certificate of competency held</th><td style="height:22px"></td><th>Role</th><td>☐ Master in charge &nbsp; ☐ Engineer in charge &nbsp; ☐ Owner &nbsp; ☐ Other</td></tr>
-      </table>
-      <div class="sigrow"><div>Supervisor signature (handwritten or electronic – typed names are not accepted)</div><div>Date</div></div>
-      <p style="font-size:9px;margin-top:14px">Exported on ${fmtDate(toLocalInput(new Date()))} at ${fmtTime(toLocalInput(new Date()))} from the applicant's digital logbook. This sheet carries the details for AMSA form 771 and is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. Any amendments must be signed and dated by the supervisor.</p>
-    </div>`;
-  }).join('');
+    es.forEach(e => Object.entries(hoursByDate(e)).forEach(([d, h]) => dates[d] = (dates[d] || 0) + h));
+    const dateList = Object.keys(dates).sort().map(d => `${fmtDate(d)} (${fmtH(dates[d])} h)`).join(', ');
+    k.title(`Near Coastal Sea Service Record (AMSA 771 data sheet) - sheet ${i + 1} of ${lines.length}`);
+    k.para(`Exported on ${nowStr()} from the applicant's digital logbook. Follows AMSA form 771 (version 2, 11/22) but is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work. Lodge with AMSA form 426. Amendments must be signed and dated by the supervisor.`, 8);
+    k.heading('Seafarer / applicant details'); k.y += 0.5;
+    k.table({ body: [['Name', p.name, 'Date of birth', p.dob ? fmtDate(p.dob) : '', 'Phone / email', p.contact].map(pt)], styles: { fontSize: 9 }, didParseCell: lab });
+    k.heading('Operational and vessel details'); k.y += 0.5;
+    k.table({
+      styles: { fontSize: 8.5 }, didParseCell: lab,
+      body: [
+        ['Company / business name', v.owner, 'Position on board', l.role, 'Vessel name', v.name, 'Unique vessel identifier / IMO no.', v.reg],
+        ['Start date', fmtDate(l.first), 'End date', fmtDate(l.last), 'Number of days (8 hrs)', String(l.days), 'Mode of operation (1)', `${l.status} - ${MODES[l.status]}`],
+        ['Type of operation (2)', OPS[l.op], 'Duties performed (3)', l.duty, 'Measured length (m)', v.len ?? '', 'Propulsion (4)', PROP[v.prop] || v.prop || ''],
+        ['COS/NS propulsion power (kW)', v.kw ?? '', 'No. of propulsion engines', v.eng ?? '', 'Note', l.status === 'VU' ? '' : 'Not-underway time counts toward AMSA 15% (deck) / 33% (engineering) cap', '', '']
+      ].map(r => r.map(pt)),
+      didDrawCell: undefined
+    });
+    k.para('Dates and hours worked: ' + dateList, 8);
+    k.sig([['Applicant signature', 2], ['Date', 1]]);
+    k.heading('Supervisor details'); k.y += 0.5;
+    k.table({
+      styles: { fontSize: 9, minCellHeight: 9 }, didParseCell: lab,
+      body: [['Supervisor name', '', 'Position (job title)', ''], ['Email', '', 'Phone', ''],
+        ['Certificate of competency held', '', 'Role', '[   ] Master in charge    [   ] Engineer in charge    [   ] Owner    [   ] Other']]
+    });
+    k.sig([['Supervisor signature (handwritten or electronic - typed names are not accepted)', 2], ['Date', 1]]);
+  });
+  k.footers();
+  return doc;
 }
+
+async function runExport(kind) {
+  const list = filtered();
+  if (!list.length) return alert('No completed entries in that range.');
+  if (!S.profile.name && !confirm('Your name is blank (Settings tab). Create the report anyway?')) return;
+  const btn = $(kind === '771' ? 'btnPdf771' : 'btnPdf'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    await loadPdfLib();
+    const doc = kind === '771' ? build771Pdf(list) : buildLogbookPdf(list);
+    const who = (S.profile.name || '').replace(/[^\w ]+/g, '').trim();
+    doc.save(`${kind === '771' ? 'Form 771 sheets' : 'Vessel Logbook'}${who ? ' - ' + who : ''} - ${toLocalInput(new Date()).slice(0, 10)}.pdf`);
+  } catch (e) { alert(e.message || 'Could not create the PDF.'); }
+  btn.disabled = false; btn.textContent = label;
+}
+$('btnPdf').onclick = () => runExport('log');
+$('btnPdf771').onclick = () => runExport('771');
 
 // ── Settings ─────────────────────────────────────────────
 function renderSettings() {
@@ -636,15 +683,15 @@ $('fileRestore').onchange = async ev => {
 // ── Spreadsheet import ───────────────────────────────────
 const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const XLSX_SRI = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';
-function loadXlsx() {
-  if (window.XLSX) return Promise.resolve();
+function loadScript(src, sri) {
   return new Promise((ok, fail) => {
     const el = document.createElement('script');
-    el.src = XLSX_SRC; el.integrity = XLSX_SRI; el.crossOrigin = 'anonymous';
-    el.onload = ok; el.onerror = () => fail(new Error('Could not load the Excel reader (are you online?). Save the sheet as CSV and try again.'));
+    el.src = src; el.integrity = sri; el.crossOrigin = 'anonymous';
+    el.onload = ok; el.onerror = () => fail(new Error('Could not load a required library (are you online?). It only needs to download once.'));
     document.head.appendChild(el);
   });
 }
+function loadXlsx() { return window.XLSX ? Promise.resolve() : loadScript(XLSX_SRC, XLSX_SRI); }
 function parseCSV(text) {
   const rows = []; let row = [], f = '', q = false;
   text = text.replace(/^﻿/, '');
