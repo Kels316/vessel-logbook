@@ -128,10 +128,10 @@ td.n, th.n { text-align: right; }
       <div class="actions">
         <button class="btn" id="btnImport">Choose spreadsheet…</button>
         <button class="btn sec" id="btnTemplate">Download template (CSV)</button>
-        <button class="btn danger hidden" id="btnUndoImport">Undo last import</button>
         <input type="file" id="fileImport" accept=".xlsx,.xls,.csv,text/csv" class="hidden">
       </div>
       <p class="note">Excel files need an internet connection the first time to load the reader. CSV works offline.</p>
+      <div id="importHistory"></div>
     </div>
     <div class="card">
       <h2>Backup</h2>
@@ -957,7 +957,7 @@ $('impGo').onclick = () => {
     const e = { id: uid(), vesselId: v.id, ...rest };
     S.entries.push(e); addedE.push(e.id);
   });
-  S.lastImport = { entries: addedE, vessels: addedV, file: imp.file, at: toLocalInput(new Date()) };
+  (S.imports = S.imports || []).push({ id: uid(), file: imp.file, at: toLocalInput(new Date()), entries: addedE, vessels: addedV });
   save(); $('dlgImport').close(); init();
   alert(`Imported ${addedE.length} entries${addedV.length ? ` and ${addedV.length} new vessel(s)` : ''}. Check the Vessels tab to complete vessel details (identifier, length, propulsion).`);
 };
@@ -969,18 +969,29 @@ $('btnTemplate').onclick = () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'logbook-import-template.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
-$('btnUndoImport').onclick = () => {
-  const li = S.lastImport; if (!li) return;
-  if (!confirm(`Undo the import of "${li.file || 'a spreadsheet'}"${li.at ? ' (' + fmtDT(li.at) + ')' : ''}?\n\nThis removes the ${li.entries.length} entries${li.vessels.length ? ' and ' + li.vessels.length + ' new vessel(s)' : ''} it added, and nothing else.`)) return;
-  S.entries = S.entries.filter(e => !li.entries.includes(e.id));
-  S.vessels = S.vessels.filter(v => !li.vessels.includes(v.id) || S.entries.some(e => e.vesselId === v.id));
-  delete S.lastImport; save(); init();
-};
+function undoImport(id) {
+  const rec = (S.imports || []).find(x => x.id === id); if (!rec) return;
+  const present = S.entries.filter(e => rec.entries.includes(e.id)).length;
+  if (!confirm(`Undo the import of "${rec.file}" (${fmtDT(rec.at)})?\n\nThis removes the ${present} entries it added that are still in the logbook${rec.vessels.length ? ', plus any of its ' + rec.vessels.length + ' new vessel(s) left with no entries' : ''}. Nothing else is touched.`)) return;
+  S.entries = S.entries.filter(e => !rec.entries.includes(e.id));
+  S.vessels = S.vessels.filter(v => !rec.vessels.includes(v.id) || S.entries.some(e => e.vesselId === v.id));
+  S.imports = S.imports.filter(x => x !== rec); save(); init();
+}
+function renderImportHistory() {
+  if (S.lastImport && !(S.imports || []).length) { S.imports = [{ id: uid(), ...S.lastImport }]; delete S.lastImport; save(); }   // migrate older single-undo record
+  const list = [...(S.imports || [])].reverse();
+  $('importHistory').innerHTML = list.length ? `<h2 style="font-size:14px;margin:14px 0 4px">Past imports</h2>` + list.map(r => {
+    const n = S.entries.filter(e => r.entries.includes(e.id)).length;
+    return `<div class="row" style="align-items:center;border-top:1px solid var(--line);padding:6px 0;gap:8px">
+      <div style="flex:1 1 200px"><b>${esc(r.file)}</b><div class="note">${fmtDT(r.at)} · ${n} of ${r.entries.length} entries still in logbook</div></div>
+      <button class="btn danger sm" style="flex:0 0 auto" data-undo="${r.id}">Undo</button></div>`;
+  }).join('') : '';
+  $('importHistory').querySelectorAll('[data-undo]').forEach(b => b.onclick = () => undoImport(b.dataset.undo));
+}
 
 // ── Init ─────────────────────────────────────────────────
 function init() {
-  $('btnUndoImport').classList.toggle('hidden', !(S.lastImport && S.lastImport.entries.length));
-  if (S.lastImport && S.lastImport.file) $('btnUndoImport').textContent = `Undo import: ${S.lastImport.file}`;
+  renderImportHistory();
   renderSettings(); renderVessels(); renderLog();
   $('xFrom').dataset.init = '';
 }
