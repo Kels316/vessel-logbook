@@ -99,7 +99,7 @@ td.n, th.n { text-align: right; }
       <select id="xVessel"></select>
       <div id="xPreview" style="margin-top:12px"></div>
       <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button></div>
-      <div class="warn"><b>Check with AMSA:</b> for near coastal certificates AMSA accepts a Record of sea service (form 771), its sea service letter template signed by a supervisor/operator/owner/master/chief engineer, or an AMSA-approved task book. A logbook PDF is not on that list by itself. <b>Form 771 sheets</b> gives one page per vessel / duty / operation type with the details to transfer onto (or attach to) AMSA\u2019s official form 771 for your supervisor to sign. The <b>Logbook PDF</b> is the full record as supporting evidence.</div>
+      <div class="warn"><b>Evidence:</b> AMSA's near coastal sea service guidance lists a Record of sea service (form 771), its sea service letter template signed by a supervisor, operator, owner, master or chief engineer, or an AMSA-approved task book. Some certificate pages also mention an approved sea service log book; this app is not AMSA-approved. Use <b>Form 771 sheets</b> (one page per vessel, duty and operation type) to complete the 771s for signature, and the <b>Logbook PDF</b> as the supporting record.</div>
       <p class="note">Creates a PDF file and downloads it (on iPhone/iPad it opens in the viewer, then use the share icon → Save to Files). Includes blank lines for you and your supervisor to sign and date. The PDF library downloads once, then works offline.</p>
     </div>
   </section>
@@ -120,7 +120,7 @@ td.n, th.n { text-align: right; }
     </div>
     <div class="card">
       <h2>How sea days are counted</h2>
-      <p class="note">Per AMSA near coastal rules: one day of sea service = 8 hours of work relevant to the certificate. Shifts shorter than 8 hours are added together until they reach 8 hours; more than 8 hours in a 24-hour period still counts as one day only. Time when the vessel is not underway (and not at anchor with someone on watch) is counted separately because AMSA caps it at 15% of the service required for a deck certificate (33% for engineering).</p>
+      <p class="note">Per AMSA near coastal rules: one day of sea service = 8 hours of work relevant to the certificate. Shifts shorter than 8 hours are added together (partial days are summed and shown as fractions, e.g. 0.3 of a day); more than 8 hours in a 24-hour period still counts as one day only. Time when the vessel is not underway (and not at anchor with someone on watch) is counted separately because AMSA caps it at 15% of the service required for a deck certificate (33% for engineering).</p>
     </div>
     <div class="card">
       <h2>Import from spreadsheet</h2>
@@ -498,7 +498,7 @@ $('vDelete').onclick = () => {
 
 // ── Summary / report ─────────────────────────────────────
 // AMSA near coastal rule: 1 day = 8 hours of relevant work. Shifts under 8 h are
-// added together; more than 8 h in a 24 h period still counts as one day.
+// added together (partial days sum); more than 8 h in a 24 h period still counts as one day.
 const DAY_H = 8;
 function hoursByDate(e) {            // split a duty across midnight into calendar dates
   const out = {};
@@ -519,7 +519,7 @@ function countDays(list) {
   list.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => perDay[k] = (perDay[k] || 0) + h));
   let full = 0, rem = 0;
   Object.values(perDay).forEach(h => { if (h >= DAY_H - 1e-9) full++; else rem += h; });
-  return Math.round((full + Math.floor((rem + 1e-9) / DAY_H) + summaryDays) * 10) / 10;
+  return full + rem / DAY_H + summaryDays;      // partial days are summed (shown to 1 decimal)
 }
 function filtered() {
   const from = $('xFrom').value, to = $('xTo').value, vid = $('xVessel').value;
@@ -550,7 +550,7 @@ function groupLines(list) {
 }
 function renderExport() {
   if (!$('xFrom').dataset.init) {
-    const dates = S.entries.map(e => dateKey(e.start)).sort();
+    const dates = S.entries.flatMap(e => [dateKey(e.start), e.end ? dateKey(e.end) : dateKey(e.start)]).sort();
     $('xFrom').value = dates[0] || ''; $('xTo').value = dates[dates.length - 1] || '';
     $('xFrom').dataset.init = 1;
   }
@@ -563,7 +563,7 @@ function updateExportPreview() {
   $('xPreview').innerHTML = `<div class="stats">
     <div class="stat"><b>${fmtD(s.daysUW)}</b><span>sea days (8 h)</span></div>
     <div class="stat"><b>${fmtD(s.daysNU)}</b><span>days not underway</span></div>
-    <div class="stat"><b>${fmtH(s.hours)}</b><span>hours worked</span></div>
+    <div class="stat"><b>${fmtH(s.hours)}</b><span>trip hours (excl. period summaries)</span></div>
     <div class="stat"><b>${s.trips}</b><span>duty entries</span></div></div>`;
 }
 ['xFrom', 'xTo', 'xVessel'].forEach(id => $(id).onchange = updateExportPreview);
