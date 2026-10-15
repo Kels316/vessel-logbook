@@ -645,7 +645,7 @@ function buildLogbookPdf(list) {
   k.table({
     head: [['#', 'Vessel', 'Start', 'End', 'Hours', 'Position', 'Duty', 'Operation', 'Mode', 'From', 'To', 'Task', 'Supervisor / master', 'Remarks']],
     body: list.map((e, i) => { const v = vesselOf(e.vesselId); return (e.summary
-      ? [i + 1, v ? v.name : '', fmtDate(e.start), fmtDate(e.end), fmtH(e.days * DAY_H), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), '', '', `Imported period summary: ${fmtD(e.days)} day(s) x ${DAY_H} h = ${fmtH(e.days * DAY_H)} h, no daily detail`, '', e.remarks]
+      ? [i + 1, v ? v.name : '', fmtDate(e.start), fmtDate(e.end), fmtH(e.days * DAY_H), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), '', '', `Imported period summary: ${fmtD(e.days)} day(s) x ${DAY_H} h = ${fmtH(e.days * DAY_H)} h, no daily detail`, '', (e.remarks || '').replace(/^TripWatch quarterly 771 summary/i, 'Imported from TripWatch quarterly 771 summary')]
       : [i + 1, v ? v.name : '', fmtDT(e.start), fmtDT(e.end), fmtH(entryHours(e)), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), e.from, e.to, e.activity, e.master, e.remarks]).map(pt); }),
     columnStyles: { 2: { minCellWidth: 24 }, 3: { minCellWidth: 24 }, 4: { halign: 'right' } }
   });
