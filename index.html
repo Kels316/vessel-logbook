@@ -76,6 +76,7 @@ td.n, th.n { text-align: right; }
     <div class="actions" style="margin:0 0 12px">
       <button class="btn" id="btnStart">▶ Start trip now</button>
       <button class="btn sec" id="btnAdd">+ Add past trip</button>
+      <button class="btn sec" id="btnAddSummary">+ Add period summary</button>
     </div>
     <div id="logList"></div>
   </section>
@@ -231,6 +232,34 @@ td.n, th.n { text-align: right; }
   </form>
 </dialog>
 
+<dialog id="dlgSummary">
+  <form method="dialog" novalidate>
+    <h2 id="sumTitle">Period summary</h2>
+    <p class="note">For past service where you only have a total for a period (for example a quarterly report), not individual trips. It counts toward days but has no trip times, and is labelled that way on the exports.</p>
+    <label>Vessel</label><select id="sVessel"></select>
+    <div class="row">
+      <div><label>Period start</label><input type="date" id="sStart"></div>
+      <div><label>Period end</label><input type="date" id="sEnd"></div>
+      <div><label>Days (8 h)</label><input type="number" id="sDays" min="0" step="0.1" inputmode="decimal"></div>
+    </div>
+    <div class="row">
+      <div><label>Position on board</label><select id="sRole"></select></div>
+      <div><label>Duty type (AMSA code)</label><select id="sDuty"></select></div>
+    </div>
+    <div class="row">
+      <div><label>Type of operation</label><select id="sOp"><option value="C">Commercial</option><option value="R">Recreational</option><option value="M">Military</option></select></div>
+      <div><label>Mode of operation</label><select id="sMode"><option value="VU">VU – Vessel underway</option><option value="NUD">NUD – Not underway, deck or refit work</option><option value="NUE">NUE – Not underway, engine or refit work</option></select></div>
+    </div>
+    <label>Source / notes</label><input id="sNote" placeholder="e.g. TripWatch quarterly report">
+    <div class="warn hidden" id="sErr"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="sSave">Save</button>
+      <button type="button" class="btn sec" id="sCancel">Cancel</button>
+      <button type="button" class="btn danger hidden" id="sDelete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlgImport">
   <form method="dialog" novalidate style="max-height:88vh;overflow:auto">
     <h2>Import spreadsheet</h2>
@@ -279,7 +308,8 @@ const fmtTime = s => s.slice(11, 16);
 const fmtDT = s => `${fmtDate(s)} ${fmtTime(s)}`;
 const hoursBetween = (a, b) => (new Date(b) - new Date(a)) / 36e5;
 const fmtH = h => h.toFixed(1);
-const entryHours = e => e.end ? Math.max(0, hoursBetween(e.start, e.end)) : 0;
+const entryHours = e => (e.end && !e.summary) ? Math.max(0, hoursBetween(e.start, e.end)) : 0;   // period summaries carry days, not hours
+const fmtD = n => { n = Math.round(n * 10) / 10; return Number.isInteger(n) ? String(n) : n.toFixed(1); };
 const MODES = { VU: 'Vessel underway', NUD: 'Not underway – deck / refit work', NUE: 'Not underway – engine / refit work' };
 const modeOf = e => (e.status === 'NUD' || e.status === 'NUE') ? e.status : (e.status === 'nu' ? 'NUD' : 'VU');
 const PROP = { I: 'I – Inboard', O: 'O – Outboard', S: 'S – Steam' };
@@ -308,17 +338,18 @@ function renderLog() {
     return `<div class="card entry" data-id="${e.id}">
       <div class="l">
         <b>${esc(v ? v.name : 'Unknown vessel')}</b>
-        <div class="meta">${fmtDT(e.start)}${live ? '' : ' → ' + fmtDT(e.end)}</div>
+        <div class="meta">${e.summary ? fmtDate(e.start) + ' → ' + fmtDate(e.end) + ' · period summary (no daily detail)' : fmtDT(e.start) + (live ? '' : ' → ' + fmtDT(e.end))}</div>
         <div class="meta">${esc(e.role)} (${esc(e.duty || 'D')})${modeOf(e) !== 'VU' ? ' · ' + modeOf(e) : ''}${e.activity ? ' · ' + esc(e.activity) : ''}${e.from || e.to ? ' · ' + esc(e.from) + ' → ' + esc(e.to) : ''}</div>
       </div>
-      <div class="hrs">${live ? '<span class="live">In progress</span>' : fmtH(entryHours(e)) + '<small>hours</small>'}
+      <div class="hrs">${e.summary ? fmtD(e.days) + '<small>days</small>' : live ? '<span class="live">In progress</span>' : fmtH(entryHours(e)) + '<small>hours</small>'}
         ${live ? '<br><button class="btn sm" data-end="' + e.id + '">End now</button>' : ''}
       </div>
     </div>`;
   }).join('');
   list.querySelectorAll('.entry').forEach(el => el.onclick = ev => {
     if (ev.target.dataset.end) return;
-    openEntry(el.dataset.id);
+    const en = S.entries.find(x => x.id === el.dataset.id);
+    en && en.summary ? openSummary(en.id) : openEntry(el.dataset.id);
   });
   list.querySelectorAll('[data-end]').forEach(b => b.onclick = ev => {
     ev.stopPropagation();
@@ -387,6 +418,40 @@ $('eDelete').onclick = () => {
   save(); $('dlgEntry').close(); renderLog();
 };
 
+// ── Period summaries ─────────────────────────────────────
+let editingSummary = null;
+function openSummary(id) {
+  if (!S.vessels.length) { alert('Add a vessel first (Vessels tab).'); showTab('vessels'); return; }
+  editingSummary = id ? S.entries.find(e => e.id === id) : null;
+  const e = editingSummary || { vesselId: S.settings.lastVessel, role: S.settings.lastRole, duty: S.settings.lastDuty, op: S.settings.lastOp, status: 'VU' };
+  $('sumTitle').textContent = editingSummary ? 'Edit period summary' : 'Add period summary';
+  fillVesselSelect($('sVessel'), e.vesselId);
+  $('sRole').innerHTML = $('eRole').innerHTML; $('sDuty').innerHTML = $('eDuty').innerHTML;
+  $('sRole').value = e.role || 'Master'; $('sDuty').value = e.duty || 'D'; $('sOp').value = e.op || 'C'; $('sMode').value = modeOf(e);
+  $('sStart').value = e.start ? e.start.slice(0, 10) : ''; $('sEnd').value = e.end ? e.end.slice(0, 10) : '';
+  $('sDays').value = e.days ?? ''; $('sNote').value = e.remarks || '';
+  $('sDelete').classList.toggle('hidden', !editingSummary); $('sErr').classList.add('hidden');
+  $('dlgSummary').showModal();
+}
+$('btnAddSummary').onclick = () => openSummary(null);
+$('sCancel').onclick = () => $('dlgSummary').close();
+$('sSave').onclick = () => {
+  const err = m => { $('sErr').textContent = m; $('sErr').classList.remove('hidden'); };
+  const st = $('sStart').value, en = $('sEnd').value, days = parseFloat($('sDays').value);
+  if (!$('sVessel').value) return err('Select a vessel.');
+  if (!st || !en) return err('Enter the period start and end dates.');
+  if (en < st) return err('Period end must not be before the start.');
+  if (!(days > 0)) return err('Enter the number of days (8 h).');
+  const rec = { id: editingSummary ? editingSummary.id : uid(), summary: true, days, vesselId: $('sVessel').value, start: st + 'T00:00', end: en + 'T23:59',
+    role: $('sRole').value, duty: $('sDuty').value, op: $('sOp').value, status: $('sMode').value, from: '', to: '', activity: '', master: '', remarks: $('sNote').value.trim() };
+  if (editingSummary) Object.assign(editingSummary, rec); else S.entries.push(rec);
+  save(); $('dlgSummary').close(); renderLog();
+};
+$('sDelete').onclick = () => {
+  if (!confirm('Delete this period summary permanently?')) return;
+  S.entries = S.entries.filter(e => e !== editingSummary); save(); $('dlgSummary').close(); renderLog();
+};
+
 // ── Vessels ──────────────────────────────────────────────
 let editingVessel = null;
 function renderVessels() {
@@ -448,11 +513,13 @@ function hoursByDate(e) {            // split a duty across midnight into calend
   return out;
 }
 function countDays(list) {
+  const summaryDays = list.filter(e => e.summary).reduce((a, e) => a + (+e.days || 0), 0);   // imported period totals: added as-is
+  list = list.filter(e => !e.summary);
   const perDay = {};
   list.forEach(e => Object.entries(hoursByDate(e)).forEach(([k, h]) => perDay[k] = (perDay[k] || 0) + h));
   let full = 0, rem = 0;
   Object.values(perDay).forEach(h => { if (h >= DAY_H - 1e-9) full++; else rem += h; });
-  return full + Math.floor((rem + 1e-9) / DAY_H);
+  return Math.round((full + Math.floor((rem + 1e-9) / DAY_H) + summaryDays) * 10) / 10;
 }
 function filtered() {
   const from = $('xFrom').value, to = $('xTo').value, vid = $('xVessel').value;
@@ -494,8 +561,8 @@ function renderExport() {
 function updateExportPreview() {
   const s = summarise(filtered());
   $('xPreview').innerHTML = `<div class="stats">
-    <div class="stat"><b>${s.daysUW}</b><span>sea days (8 h)</span></div>
-    <div class="stat"><b>${s.daysNU}</b><span>days not underway</span></div>
+    <div class="stat"><b>${fmtD(s.daysUW)}</b><span>sea days (8 h)</span></div>
+    <div class="stat"><b>${fmtD(s.daysNU)}</b><span>days not underway</span></div>
     <div class="stat"><b>${fmtH(s.hours)}</b><span>hours worked</span></div>
     <div class="stat"><b>${s.trips}</b><span>duty entries</span></div></div>`;
 }
@@ -570,14 +637,16 @@ function buildLogbookPdf(list) {
   k.heading('2. Sea service summary (1 day = 8 hours of work)');
   k.table({
     head: [['Company / business', 'Position', 'Vessel', 'Unique vessel ID / IMO', 'Start date', 'End date', 'Days (8 h)', 'Mode', 'Operation', 'Duty', 'Length (m)', 'Propulsion', 'kW', 'Engines']],
-    body: lines.map(l => { const v = l.vessel || {}; return [v.owner, l.role, v.name, v.reg, fmtDate(l.first), fmtDate(l.last), l.days, l.status, OPS[l.op], l.duty, v.len ?? '', PROP[v.prop] || v.prop || '', v.kw ?? '', v.eng ?? ''].map(pt); }),
+    body: lines.map(l => { const v = l.vessel || {}; return [v.owner, l.role, v.name, v.reg, fmtDate(l.first), fmtDate(l.last), fmtD(l.days), l.status, OPS[l.op], l.duty, v.len ?? '', PROP[v.prop] || v.prop || '', v.kw ?? '', v.eng ?? ''].map(pt); }),
     columnStyles: { 6: { halign: 'right', fontStyle: 'bold' }, 10: { halign: 'right' }, 12: { halign: 'right' }, 13: { halign: 'right' } }
   });
-  k.para(`Total: ${tot.daysUW} day(s) underway (VU); ${tot.daysNU} day(s) not underway (NUD/NUE). AMSA limits not-underway time to 15% of the service required for a deck certificate and 33% for engineering. Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.`, 8);
+  k.para(`Total: ${fmtD(tot.daysUW)} day(s) underway (VU); ${fmtD(tot.daysNU)} day(s) not underway (NUD/NUE). AMSA limits not-underway time to 15% of the service required for a deck certificate and 33% for engineering. Days are counted per line; days across different lines may overlap on the same date and must not be added together without checking AMSA's one-day-per-24-hours rule.`, 8);
   k.heading('3. Duty record');
   k.table({
     head: [['#', 'Vessel', 'Start', 'End', 'Hours', 'Position', 'Duty', 'Operation', 'Mode', 'From', 'To', 'Task', 'Supervisor / master', 'Remarks']],
-    body: list.map((e, i) => { const v = vesselOf(e.vesselId); return [i + 1, v ? v.name : '', fmtDT(e.start), fmtDT(e.end), fmtH(entryHours(e)), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), e.from, e.to, e.activity, e.master, e.remarks].map(pt); }),
+    body: list.map((e, i) => { const v = vesselOf(e.vesselId); return (e.summary
+      ? [i + 1, v ? v.name : '', fmtDate(e.start), fmtDate(e.end), '-', e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), '', '', `Imported period summary: ${fmtD(e.days)} day(s), no daily detail`, '', e.remarks]
+      : [i + 1, v ? v.name : '', fmtDT(e.start), fmtDT(e.end), fmtH(entryHours(e)), e.role, e.duty || 'D', OPS[e.op || 'C'], modeOf(e), e.from, e.to, e.activity, e.master, e.remarks]).map(pt); }),
     columnStyles: { 2: { minCellWidth: 24 }, 3: { minCellWidth: 24 }, 4: { halign: 'right' } }
   });
   k.ensure(75);
@@ -601,7 +670,7 @@ function build771Pdf(list) {
     const v = l.vessel || {};
     const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && modeOf(e) === l.status);
     const dates = {};
-    es.forEach(e => Object.entries(hoursByDate(e)).forEach(([d, h]) => dates[d] = (dates[d] || 0) + h));
+    es.filter(e => !e.summary).forEach(e => Object.entries(hoursByDate(e)).forEach(([d, h]) => dates[d] = (dates[d] || 0) + h));
     const dateList = Object.keys(dates).sort().map(d => `${fmtDate(d)} (${fmtH(dates[d])} h)`).join(', ');
     k.title(`Near Coastal Sea Service Record (AMSA 771 data sheet) - sheet ${i + 1} of ${lines.length}`);
     k.para(`Exported on ${nowStr()} from the applicant's digital logbook. Follows AMSA form 771 (version 2, 11/22) but is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work. Lodge with AMSA form 426. Amendments must be signed and dated by the supervisor.`, 8);
@@ -612,13 +681,14 @@ function build771Pdf(list) {
       styles: { fontSize: 8.5 }, didParseCell: lab,
       body: [
         ['Company / business name', v.owner, 'Position on board', l.role, 'Vessel name', v.name, 'Unique vessel identifier / IMO no.', v.reg],
-        ['Start date', fmtDate(l.first), 'End date', fmtDate(l.last), 'Number of days (8 hrs)', String(l.days), 'Mode of operation (1)', `${l.status} - ${MODES[l.status]}`],
+        ['Start date', fmtDate(l.first), 'End date', fmtDate(l.last), 'Number of days (8 hrs)', fmtD(l.days), 'Mode of operation (1)', `${l.status} - ${MODES[l.status]}`],
         ['Type of operation (2)', OPS[l.op], 'Duties performed (3)', l.duty, 'Measured length (m)', v.len ?? '', 'Propulsion (4)', PROP[v.prop] || v.prop || ''],
         ['COS/NS propulsion power (kW)', v.kw ?? '', 'No. of propulsion engines', v.eng ?? '', 'Note', l.status === 'VU' ? '' : 'Not-underway time counts toward AMSA 15% (deck) / 33% (engineering) cap', '', '']
       ].map(r => r.map(pt)),
       didDrawCell: undefined
     });
-    k.para('Dates and hours worked: ' + dateList, 8);
+    const sums = es.filter(e => e.summary).map(e => `${fmtDate(e.start)} to ${fmtDate(e.end)} (${fmtD(e.days)} days)`);
+    k.para([dateList && 'Dates and hours worked: ' + dateList, sums.length && 'Imported period summaries (no daily detail): ' + sums.join('; ')].filter(Boolean).join('   '), 8);
     k.sig([['Applicant signature', 2], ['Date', 1]]);
     k.heading('Supervisor details'); k.y += 0.5;
     k.table({
@@ -731,14 +801,20 @@ function parseTime(v) {   // → minutes since midnight
 const toIso = (dt, min) => { const t = new Date(Date.UTC(dt.y, dt.m - 1, dt.d, 0, min)); return `${t.getUTCFullYear()}-${p2(t.getUTCMonth() + 1)}-${p2(t.getUTCDate())}T${p2(t.getUTCHours())}:${p2(t.getUTCMinutes())}`; };
 
 const IMP_FIELDS = [
-  ['date', 'Date', /^date|^day$/i], ['start', 'Start time', /start|depart|begin|time (on|out)|sign.?on|^from time/i],
+  ['date', 'Date (or period start)', /^date|^day$|period start/i], ['endDate', 'Period end date (summaries)', /end date|period end/i],
+  ['days', 'Days, 8 h (period summaries)', /^days?\b|days \(/i], ['vesselId', 'Vessel ID / IMO', /vessel id|identifier|imo|regist/i],
+  ['start', 'Start time', /start|depart|begin|time (on|out)|sign.?on|^from time/i],
   ['end', 'End time', /\bend|arriv|finish|time (off|in)|sign.?off|return/i], ['hours', 'Hours (if no end time)', /hour|hrs|duration/i],
-  ['vessel', 'Vessel', /vessel|boat|ship/i], ['role', 'Position', /position|role|capacity|rank/i],
+  ['vessel', 'Vessel', /vessel|boat|ship/i], ['company', 'Company / business', /company|business|owner/i],
+  ['length', 'Measured length (m)', /length/i], ['prop', 'Propulsion (I/O/S)', /propulsion/i], ['eng', 'No. of engines', /engines?\b/i],
+  ['role', 'Position', /position|role|capacity|rank/i],
   ['duty', 'Duty code', /dut(y|ies)/i], ['op', 'Type of operation', /operation|type/i],
   ['mode', 'Mode (VU/NUD/NUE)', /mode|status|underway/i], ['from', 'From', /^(from|origin|dep\w* (port|loc|point))/i],
   ['to', 'To', /^(to|destination|arr\w* (port|loc|point))/i], ['activity', 'Task / activity', /task|activity|purpose|job/i],
-  ['master', 'Supervisor / master', /supervisor|master|skipper/i], ['remarks', 'Remarks', /remark|note|comment|weather/i]
+  ['master', 'Supervisor / master', /supervisor|master|skipper/i], ['remarks', 'Remarks', /remark|note|comment|weather|source/i]
 ];
+const ROLES = ['Master', 'Mate', 'Coxswain', 'GPH', 'Engineer', 'Other'];
+const roleName = v => { v = String(v).trim(); return ROLES.find(x => x.toLowerCase() === v.toLowerCase()) || (v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : ''); };
 const DUTIES = ['D', 'INW', 'C', 'GPH', 'DE', 'E', 'AE', 'EW', 'EIC', 'AEIC'];
 let imp = null;   // { headers, rows, map }
 
@@ -805,10 +881,32 @@ function convertRows() {
   const def = { role: $('impRole').value, duty: $('impDuty').value, op: $('impOp').value, mode: $('impMode').value, vessel: $('impVessel').value };
   const [dh, dm] = ($('impStart').value || '08:00').split(':').map(Number);
   const good = [], bad = [];
+  const propCode = v => { v = String(v).trim().toUpperCase(); return /^I/.test(v) ? 'I' : /^O/.test(v) ? 'O' : /^S/.test(v) ? 'S' : ''; };
+  const num = v => { const n = parseFloat(String(v).replace(',', '.')); return n > 0 ? n : null; };
   imp.rows.forEach((r, i) => {
     const line = i + 2, fail = why => bad.push(`Row ${line}: ${why}`);
     const sd = parseDate(cell(r, 'date')) || parseDate(cell(r, 'start'));
     if (!sd) return fail('no valid date');
+    const vName = String(cell(r, 'vessel')).trim();
+    if (!vName && !def.vessel) return fail('no vessel (choose a default vessel)');
+    let duty = String(cell(r, 'duty')).trim().toUpperCase(), note = String(cell(r, 'remarks')).trim();
+    if (!DUTIES.includes(duty)) { if (duty && duty !== '') note = (note ? note + ' | ' : '') + `Duties listed in source: ${String(cell(r, 'duty')).trim()}`; duty = def.duty; }
+    let op = String(cell(r, 'op')).trim().charAt(0).toUpperCase(); if (!'CRM'.includes(op) || !op) op = def.op;
+    const mt = String(cell(r, 'mode')).trim().toUpperCase();
+    const mode = /NUE|ENGINE/.test(mt) ? 'NUE' : /NUD|NOT UNDERWAY|REFIT|ALONGSIDE/.test(mt) ? 'NUD' : /VU|UNDERWAY/.test(mt) ? 'VU' : def.mode;
+    const common = {
+      vName, role: roleName(cell(r, 'role')) || def.role,
+      duty, op, status: mode, from: String(cell(r, 'from')).trim(), to: String(cell(r, 'to')).trim(),
+      activity: String(cell(r, 'activity')).trim(), master: String(cell(r, 'master')).trim(), remarks: note,
+      vInfo: { reg: String(cell(r, 'vesselId')).trim(), owner: String(cell(r, 'company')).trim(), len: num(cell(r, 'length')), prop: propCode(cell(r, 'prop')), eng: num(cell(r, 'eng')) }
+    };
+    // Period summary row (a total for a period, no individual trip times)
+    const dayN = m.days == null ? NaN : parseFloat(String(cell(r, 'days')).replace(',', '.'));
+    if (dayN > 0) {
+      const ed = (m.endDate != null && parseDate(cell(r, 'endDate'))) || sd;
+      if (toIso(ed, 0) < toIso(sd, 0)) return fail('period end is before period start');
+      return good.push({ ...common, summary: true, days: dayN, start: toIso(sd, 0), end: toIso(ed, 1439) });
+    }
     let sm = m.start == null || String(cell(r, 'start')).trim() === '' ? null : parseTime(cell(r, 'start'));
     if (sm == null) sm = dh * 60 + dm;
     let ed = sd, em;
@@ -821,17 +919,7 @@ function convertRows() {
     let startIso = toIso(sd, sm), endIso = toIso(ed, em);
     if (endIso <= startIso && ed === sd) endIso = toIso(ed, em + 1440);
     if (endIso <= startIso) return fail('end is not after start');
-    const vName = String(cell(r, 'vessel')).trim();
-    if (!vName && !def.vessel) return fail('no vessel (choose a default vessel)');
-    let duty = String(cell(r, 'duty')).trim().toUpperCase(); if (!DUTIES.includes(duty)) duty = def.duty;
-    let op = String(cell(r, 'op')).trim().charAt(0).toUpperCase(); if (!'CRM'.includes(op) || !op) op = def.op;
-    const mt = String(cell(r, 'mode')).trim().toUpperCase();
-    const mode = /NUE|ENGINE/.test(mt) ? 'NUE' : /NUD|NOT UNDERWAY|REFIT|ALONGSIDE/.test(mt) ? 'NUD' : /VU|UNDERWAY/.test(mt) ? 'VU' : def.mode;
-    good.push({
-      vName, start: startIso, end: endIso, role: String(cell(r, 'role')).trim() || def.role, duty, op, status: mode,
-      from: String(cell(r, 'from')).trim(), to: String(cell(r, 'to')).trim(), activity: String(cell(r, 'activity')).trim(),
-      master: String(cell(r, 'master')).trim(), remarks: String(cell(r, 'remarks')).trim()
-    });
+    good.push({ ...common, start: startIso, end: endIso });
   });
   return { good, bad, def };
 }
@@ -839,20 +927,22 @@ function runPreview() {
   const { good, bad, def } = convertRows();
   const known = n => S.vessels.find(v => v.name.toLowerCase() === n.toLowerCase());
   const newV = [...new Set(good.map(g => g.vName).filter(n => n && !known(n)))];
-  const dupe = g => { const v = g.vName ? known(g.vName) : vesselOf(def.vessel); return v && S.entries.some(e => e.vesselId === v.id && e.start === g.start && e.end === g.end); };
+  const dupe = g => { const v = g.vName ? known(g.vName) : vesselOf(def.vessel); return v && S.entries.some(e => e.vesselId === v.id && e.start === g.start && e.end === g.end && (!g.summary || (e.summary && e.role === g.role && e.duty === g.duty && e.status === g.status))); };
   const seen = new Set();
-  const fresh = good.filter(g => { const k = (g.vName || def.vessel).toLowerCase() + g.start + g.end; if (seen.has(k)) return false; seen.add(k); return !dupe(g); });
+  const fresh = good.filter(g => { const k = (g.vName || def.vessel).toLowerCase() + g.start + g.end + g.role + g.duty + g.status + (g.summary ? 'S' : ''); if (seen.has(k)) return false; seen.add(k); return !dupe(g); });
   imp.ready = fresh;
-  const hrs = fresh.reduce((s, g) => s + hoursBetween(g.start, g.end), 0);
+  const hrs = fresh.filter(g => !g.summary).reduce((s, g) => s + hoursBetween(g.start, g.end), 0);
+  const sumDays = fresh.filter(g => g.summary).reduce((s, g) => s + g.days, 0);
   $('impPreview').innerHTML = `
     <div class="stats" style="margin-top:12px">
       <div class="stat"><b>${fresh.length}</b><span>entries to import</span></div>
       <div class="stat"><b>${fmtH(hrs)}</b><span>hours</span></div>
+      ${sumDays ? `<div class="stat"><b>${fmtD(sumDays)}</b><span>days from period summaries</span></div>` : ''}
       <div class="stat"><b>${good.length - fresh.length}</b><span>duplicates skipped</span></div>
       <div class="stat"><b>${bad.length}</b><span>rows skipped</span></div></div>
     ${newV.length ? `<p class="note">New vessels to be created: ${newV.map(esc).join(', ')}</p>` : ''}
     ${fresh.length ? `<table style="margin-top:8px"><thead><tr><th>Start</th><th>End</th><th>Vessel</th><th>Position</th><th>Duty</th><th class="n">Hrs</th></tr></thead><tbody>
-      ${fresh.slice(0, 5).map(g => `<tr><td>${fmtDT(g.start)}</td><td>${fmtDT(g.end)}</td><td>${esc(g.vName || (vesselOf(def.vessel) || {}).name)}</td><td>${esc(g.role)}</td><td>${g.duty}</td><td class="n">${fmtH(hoursBetween(g.start, g.end))}</td></tr>`).join('')}
+      ${fresh.slice(0, 5).map(g => `<tr><td>${g.summary ? fmtDate(g.start) : fmtDT(g.start)}</td><td>${g.summary ? fmtDate(g.end) : fmtDT(g.end)}</td><td>${esc(g.vName || (vesselOf(def.vessel) || {}).name)}</td><td>${esc(g.role)}</td><td>${g.duty}</td><td class="n">${g.summary ? fmtD(g.days) + ' d' : fmtH(hoursBetween(g.start, g.end))}</td></tr>`).join('')}
       </tbody></table>${fresh.length > 5 ? `<p class="note">…and ${fresh.length - 5} more</p>` : ''}` : ''}
     ${bad.length ? `<div class="warn"><b>Skipped:</b><br>${bad.slice(0, 8).map(esc).join('<br>')}${bad.length > 8 ? `<br>…and ${bad.length - 8} more` : ''}</div>` : ''}`;
   $('impGo').disabled = !fresh.length;
@@ -862,8 +952,8 @@ $('impGo').onclick = () => {
   const addedV = [], addedE = [];
   imp.ready.forEach(g => {
     let v = g.vName ? S.vessels.find(x => x.name.toLowerCase() === g.vName.toLowerCase()) : vesselOf(def.vessel);
-    if (!v) { v = { id: uid(), name: g.vName }; S.vessels.push(v); addedV.push(v.id); }
-    const { vName, ...rest } = g;
+    if (!v) { const i = g.vInfo || {}; v = { id: uid(), name: g.vName }; if (i.reg) v.reg = i.reg; if (i.owner) v.owner = i.owner; if (i.len) v.len = i.len; if (i.prop) v.prop = i.prop; if (i.eng) v.eng = i.eng; S.vessels.push(v); addedV.push(v.id); }
+    const { vName, vInfo, ...rest } = g;
     const e = { id: uid(), vesselId: v.id, ...rest };
     S.entries.push(e); addedE.push(e.id);
   });
