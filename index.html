@@ -957,7 +957,7 @@ $('impGo').onclick = () => {
     const e = { id: uid(), vesselId: v.id, ...rest };
     S.entries.push(e); addedE.push(e.id);
   });
-  S.lastImport = { entries: addedE, vessels: addedV };
+  S.lastImport = { entries: addedE, vessels: addedV, file: imp.file, at: toLocalInput(new Date()) };
   save(); $('dlgImport').close(); init();
   alert(`Imported ${addedE.length} entries${addedV.length ? ` and ${addedV.length} new vessel(s)` : ''}. Check the Vessels tab to complete vessel details (identifier, length, propulsion).`);
 };
@@ -971,7 +971,7 @@ $('btnTemplate').onclick = () => {
 };
 $('btnUndoImport').onclick = () => {
   const li = S.lastImport; if (!li) return;
-  if (!confirm(`Remove the ${li.entries.length} entries (and ${li.vessels.length} vessels) added by the last import?`)) return;
+  if (!confirm(`Undo the import of "${li.file || 'a spreadsheet'}"${li.at ? ' (' + fmtDT(li.at) + ')' : ''}?\n\nThis removes the ${li.entries.length} entries${li.vessels.length ? ' and ' + li.vessels.length + ' new vessel(s)' : ''} it added, and nothing else.`)) return;
   S.entries = S.entries.filter(e => !li.entries.includes(e.id));
   S.vessels = S.vessels.filter(v => !li.vessels.includes(v.id) || S.entries.some(e => e.vesselId === v.id));
   delete S.lastImport; save(); init();
@@ -980,6 +980,7 @@ $('btnUndoImport').onclick = () => {
 // ── Init ─────────────────────────────────────────────────
 function init() {
   $('btnUndoImport').classList.toggle('hidden', !(S.lastImport && S.lastImport.entries.length));
+  if (S.lastImport && S.lastImport.file) $('btnUndoImport').textContent = `Undo import: ${S.lastImport.file}`;
   renderSettings(); renderVessels(); renderLog();
   $('xFrom').dataset.init = '';
 }
