@@ -1,6 +1,6 @@
 // Logbook app shell: network-first, falls back to cache when offline.
 // User data lives in localStorage on the device, never in this cache.
-const CACHE_NAME = 'logbook-v13';
+const CACHE_NAME = 'logbook-v14';
 const SHELL = ['./', './index.html', './manifest.json'];
 // PDF libraries: cached best-effort so export works offline
 const LIBS = [
@@ -25,6 +25,9 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const u = new URL(e.request.url);
+  // Only handle our own files and the CDN libraries; never touch (or cache) API traffic such as GitHub sync
+  if (u.origin !== self.location.origin && u.hostname !== 'cdnjs.cloudflare.com') return;
   e.respondWith(
     fetch(e.request)
       .then(r => {

@@ -68,6 +68,7 @@ td.n, th.n { text-align: right; }
 <header>
   <h1>Vessel Logbook</h1>
   <div class="sub" id="who">Crew sea service record</div>
+  <div class="sub hidden" id="hdrSync" style="cursor:pointer"></div>
 </header>
 
 <main>
@@ -132,6 +133,29 @@ td.n, th.n { text-align: right; }
       </div>
       <p class="note">Excel files need an internet connection the first time to load the reader. CSV works offline.</p>
       <div id="importHistory"></div>
+    </div>
+    <div class="card">
+      <h2>Sync between devices (GitHub)</h2>
+      <p class="note">Keeps your logbook in a <b>private</b> GitHub repository so your phone and laptop stay in step. It works offline and syncs when you're online. Every sync is a commit, so GitHub keeps the full history.</p>
+      <details style="margin:8px 0"><summary><b>Set-up steps</b></summary>
+        <ol class="note" style="padding-left:18px">
+          <li>On github.com create a new <b>private</b> repository (for example <code>vessel-logbook-data</code>) and tick "Add a README file".</li>
+          <li>Go to Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token.</li>
+          <li>Repository access: <b>Only select repositories</b> → that repository. Permissions → Repository permissions → <b>Contents: Read and write</b>. Pick an expiry (the maximum is 1 year).</li>
+          <li>Copy the token and paste it below, with the repository as <code>owner/name</code>, then tap Connect.</li>
+          <li>Set up your device that already has your data first. On other devices, connect before entering data, so records aren't duplicated.</li>
+        </ol>
+      </details>
+      <label>Repository (owner/name)</label><input id="syncRepo" placeholder="your-username/vessel-logbook-data" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <label>Access token</label><input id="syncToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+      <label>File name in the repository</label><input id="syncPath" value="logbook.json" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="actions">
+        <button class="btn" id="syncConnect">Connect &amp; sync</button>
+        <button class="btn sec hidden" id="syncNowBtn">Sync now</button>
+        <button class="btn danger hidden" id="syncOff">Disconnect</button>
+      </div>
+      <div class="note" id="syncStatus" style="margin-top:10px"></div>
+      <p class="note">The token is stored only on this device (never in the repository or in backups). The app refuses to connect to a public repository.</p>
     </div>
     <div class="card">
       <h2>Backup</h2>
@@ -283,7 +307,10 @@ const blank = () => ({
   profile: { name: '', id: '', cert: '', contact: '', dob: '' },
   settings: { lastVessel: '', lastRole: 'Master', lastDuty: 'D', lastOp: 'C', lastMaster: '' },
   vessels: [],
-  entries: []
+  entries: [],
+  imports: [],
+  deleted: {},   // tombstones for sync: id -> time deleted
+  sig: {}        // last-seen fingerprint of each record, used to detect changes
 });
 let S = load();
 
@@ -294,9 +321,32 @@ function load() {
   } catch (e) { console.warn('load failed', e); }
   return blank();
 }
-function save() {
+// Change tracking for sync: every record gets a last-changed time (_u); deletions leave a tombstone.
+const SYNC_KINDS = ['entries', 'vessels', 'imports'];
+const sigOf = r => JSON.stringify(r, (k, v) => k === '_u' ? undefined : v);
+function stamp() {
+  const now = Date.now(), seen = new Set();
+  S.sig = S.sig || {}; S.deleted = S.deleted || {};
+  SYNC_KINDS.forEach(kind => (S[kind] = S[kind] || []).forEach(r => {
+    seen.add(r.id); const g = sigOf(r);
+    if (S.sig[r.id] !== g) { r._u = now; S.sig[r.id] = g; delete S.deleted[r.id]; }
+  }));
+  seen.add('_profile'); const pg = sigOf(S.profile);
+  if (S.sig._profile !== pg) {
+    const blankProfile = !Object.entries(S.profile).some(([k, v]) => k !== '_u' && v);
+    if (!blankProfile || S.profile._u) S.profile._u = now;      // an untouched empty profile must never beat a real one on another device
+    S.sig._profile = pg;
+  }
+  Object.keys(S.sig).forEach(id => { if (!seen.has(id)) { delete S.sig[id]; S.deleted[id] = now; } });
+}
+let applyingSync = false;
+function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(S)); }
   catch (e) { alert('Could not save data: storage is full or blocked. Export a backup now.'); }
+}
+function save() {
+  stamp(); persist();
+  if (!applyingSync && typeof scheduleSync === 'function') scheduleSync();
 }
 
 // ── Date helpers (all local time) ────────────────────────
@@ -743,9 +793,13 @@ $('fileRestore').onchange = async ev => {
   try {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.entries) || !Array.isArray(d.vessels)) throw new Error('not a logbook backup');
-    if (!confirm(`Replace ALL current data with this backup (${d.entries.length} trips, ${d.vessels.length} vessels)?`)) return;
+    if (!confirm(`Replace ALL current data with this backup (${d.entries.length} trips, ${d.vessels.length} vessels)?${syncCfg ? '\n\nSync is on: records that exist only in GitHub (not in this backup) will be added back at the next sync.' : ''}`)) return;
     const b = blank();
+    const idsOf = x => [...(x.entries || []), ...(x.vessels || []), ...(x.imports || [])].map(r => r.id);
+    const keep = new Set(idsOf(d)), dead = { ...(S.deleted || {}) };
+    idsOf(S).forEach(id => { if (!keep.has(id)) dead[id] = Date.now(); });
     S = { ...b, ...d, profile: { ...b.profile, ...d.profile }, settings: { ...b.settings, ...d.settings } };
+    S.deleted = { ...(d.deleted || {}), ...dead }; S.sig = {};      // forces every restored record to count as newly changed
     save(); init();
   } catch (e) { alert('Could not import: ' + e.message); }
 };
@@ -989,9 +1043,160 @@ function renderImportHistory() {
   $('importHistory').querySelectorAll('[data-undo]').forEach(b => b.onclick = () => undoImport(b.dataset.undo));
 }
 
+// ── Sync with a private GitHub repository ────────────────
+const SYNC_KEY = 'vessel-logbook-sync';
+let syncCfg = null;
+try { syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)); } catch (e) { syncCfg = null; }
+const saveSyncCfg = () => { try { syncCfg ? localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)) : localStorage.removeItem(SYNC_KEY); } catch (e) {} };
+const toB64 = str => { const b = new TextEncoder().encode(str); let bin = ''; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); };
+const fromB64 = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+let syncing = null, syncTimer = null;
+
+function payloadOf(st) { return { v: 1, profile: st.profile, entries: st.entries, vessels: st.vessels, imports: st.imports || [], deleted: st.deleted || {} }; }
+const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+const canon = p => JSON.stringify({ profile: p.profile, entries: [...p.entries].sort(byId), vessels: [...p.vessels].sort(byId), imports: [...(p.imports || [])].sort(byId), deleted: p.deleted });
+// Newest change wins per record; a deletion beats an older copy of the record.
+function mergePayloads(local, remote) {
+  const tomb = { ...(remote.deleted || {}) };
+  Object.entries(local.deleted || {}).forEach(([id, t]) => tomb[id] = Math.max(tomb[id] || 0, t));
+  const cutoff = Date.now() - 400 * 864e5;
+  Object.keys(tomb).forEach(id => { if (tomb[id] < cutoff) delete tomb[id]; });
+  const out = { v: 1, deleted: tomb };
+  SYNC_KINDS.forEach(kind => {
+    const m = new Map();
+    [...(remote[kind] || []), ...(local[kind] || [])].forEach(r => { const o = m.get(r.id); if (!o || (r._u || 0) >= (o._u || 0)) m.set(r.id, r); });   // local wins ties
+    out[kind] = [...m.values()].filter(r => !(tomb[r.id] && tomb[r.id] >= (r._u || 0)));
+  });
+  out.profile = ((remote.profile && remote.profile._u) || 0) > ((local.profile && local.profile._u) || 0) ? remote.profile : local.profile;
+  return out;
+}
+// Update our records in place so an open edit dialog keeps pointing at live objects
+function reconcile(local, merged) {
+  const m = new Map(local.map(r => [r.id, r]));
+  return merged.map(r => { const l = m.get(r.id); if (!l) return r; if (l !== r) { Object.keys(l).forEach(k => { if (!(k in r)) delete l[k]; }); Object.assign(l, r); } return l; });
+}
+function applyMerged(mg) {
+  applyingSync = true;
+  SYNC_KINDS.forEach(kind => { S[kind] = reconcile(S[kind] || [], mg[kind]); });
+  Object.keys(S.profile).forEach(k => { if (!(k in mg.profile)) delete S.profile[k]; }); Object.assign(S.profile, mg.profile);
+  S.deleted = mg.deleted; S.sig = {};
+  SYNC_KINDS.forEach(kind => S[kind].forEach(r => S.sig[r.id] = sigOf(r)));
+  S.sig._profile = sigOf(S.profile);
+  persist(); applyingSync = false;
+}
+
+async function gh(path, opts = {}) {
+  return fetch(`https://api.github.com/repos/${syncCfg.repo}${path}`, {
+    ...opts, cache: 'no-store',
+    headers: { Authorization: 'Bearer ' + syncCfg.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers || {}) }
+  });
+}
+async function ghErr(r) {
+  let m = ''; try { m = (await r.json()).message || ''; } catch (e) {}
+  if (r.status === 401) return 'GitHub rejected the token (expired or wrong). Create a new one and reconnect.';
+  if (r.status === 403 || r.status === 404) return `${r.status} ${m} - check the repository name and that the token has Contents: Read and write on it.`;
+  return `${r.status} ${m}`.trim();
+}
+const filePath = () => `/contents/${syncCfg.path.split('/').map(encodeURIComponent).join('/')}`;
+async function ghGet() {
+  const r = await gh(filePath());
+  if (r.status === 404) return { payload: null, sha: null };
+  if (!r.ok) throw new Error(await ghErr(r));
+  const j = await r.json();
+  if (j.encoding !== 'base64' || j.content === undefined) throw new Error('GitHub did not return the file contents (file too large?).');
+  let p; try { p = JSON.parse(fromB64(j.content)); } catch (e) { throw new Error('The file in the repository is not valid logbook data.'); }
+  if (!p || !Array.isArray(p.entries) || !Array.isArray(p.vessels)) throw new Error('The file in the repository is not logbook data.');
+  if (p.v > 1) throw new Error('The repository file comes from a newer version of this app. Reload the app and try again.');
+  return { payload: { ...p, deleted: p.deleted || {}, imports: p.imports || [] }, sha: j.sha };
+}
+async function ghPut(m, sha) {
+  const body = { message: `Logbook sync ${new Date().toISOString()}`, content: toB64(JSON.stringify({ ...m, savedAt: new Date().toISOString() })), ...(sha ? { sha } : {}) };
+  const r = await gh(filePath(), { method: 'PUT', body: JSON.stringify(body) });
+  if (r.ok) return { ok: true };
+  if (r.status === 409 || r.status === 422) return { conflict: true, msg: await ghErr(r) };
+  return { ok: false, msg: await ghErr(r) };
+}
+
+function setSyncStatus(msg, bad) {
+  const st = $('syncStatus'), h = $('hdrSync');
+  if (st) { st.textContent = msg; st.style.color = bad ? 'var(--danger)' : ''; }
+  if (h) {
+    h.classList.toggle('hidden', !(syncCfg && syncCfg.token));
+    h.textContent = bad ? '⚠ Sync problem – tap for details' : (syncCfg && syncCfg.last ? 'Synced ' + fmtTime(toLocalInput(new Date(syncCfg.last))) : '');
+    h.onclick = () => showTab('settings');
+  }
+}
+function renderSync() {
+  const on = !!(syncCfg && syncCfg.token);
+  $('syncNowBtn').classList.toggle('hidden', !on); $('syncOff').classList.toggle('hidden', !on);
+  $('syncConnect').textContent = on ? 'Save changes & sync' : 'Connect & sync';
+  if (on) { $('syncRepo').value = syncCfg.repo; $('syncPath').value = syncCfg.path; $('syncToken').placeholder = '•••••• saved on this device (leave blank to keep)'; }
+  setSyncStatus(on ? (syncCfg.last ? 'Last synced ' + fmtDT(toLocalInput(new Date(syncCfg.last))) : 'Connected.') : 'Not connected.');
+}
+function scheduleSync(ms = 2500) {
+  if (!syncCfg || !syncCfg.token) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(), ms);
+}
+function syncNow() {
+  if (!syncCfg || !syncCfg.token) return Promise.resolve();
+  if (syncing) return syncing;
+  if (document.querySelector('dialog[open]')) { scheduleSync(5000); return Promise.resolve(); }
+  if (!navigator.onLine) { setSyncStatus('Offline – will sync when you are back online.'); return Promise.resolve(); }
+  stamp(); persist();
+  setSyncStatus('Syncing…');
+  syncing = (async () => {
+    try {
+      let lastMsg = '';
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const r = await ghGet();
+        const merged = r.payload ? mergePayloads(payloadOf(S), r.payload) : payloadOf(S);
+        const changedLocal = canon(merged) !== canon(payloadOf(S));
+        if (changedLocal) { applyMerged(merged); init(); }
+        if (r.payload && canon(merged) === canon(r.payload)) { syncCfg.last = Date.now(); saveSyncCfg(); renderSync(); return; }
+        const res = await ghPut(merged, r.sha);
+        if (res.ok) { syncCfg.last = Date.now(); saveSyncCfg(); renderSync(); return; }
+        if (!res.conflict) throw new Error(res.msg);
+        lastMsg = res.msg;
+      }
+      throw new Error('Could not complete the sync after several tries' + (lastMsg ? ' (' + lastMsg + ')' : '') + '. It will retry.');
+    } catch (e) { setSyncStatus('Sync failed: ' + (e.message || e), true); }
+    finally { syncing = null; }
+  })();
+  return syncing;
+}
+$('syncConnect').onclick = async () => {
+  const repo = $('syncRepo').value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const token = $('syncToken').value.trim() || (syncCfg && syncCfg.token) || '', path = ($('syncPath').value.trim() || 'logbook.json').replace(/^\/+/, '');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return alert('Enter the repository as owner/name, for example your-username/vessel-logbook-data.');
+  if (!token) return alert('Paste your GitHub access token.');
+  const prev = syncCfg; syncCfg = { repo, token, path, last: prev && prev.repo === repo ? prev.last : null };
+  setSyncStatus('Checking repository…');
+  try {
+    const rr = await gh('');
+    if (!rr.ok) throw new Error(await ghErr(rr));
+    const info = await rr.json();
+    if (!info.private) { syncCfg = prev; renderSync(); return alert('That repository is PUBLIC. Your logbook contains personal details, so the app will only sync to a private repository. Make it private (or create a private one) and try again.'); }
+    if (info.permissions && info.permissions.push === false) throw new Error('This token can only read the repository. Give it Contents: Read and write.');
+    const remote = await ghGet();
+    if (remote.payload && (S.entries.length || S.vessels.length) && (!prev || prev.repo !== repo)) {
+      if (!confirm(`The repository already has logbook data (${remote.payload.entries.length} entries) and so does this device (${S.entries.length}).\n\nThey will be combined. If you imported the same spreadsheet on both, you may get duplicates (the Past imports list can undo one).\n\nContinue?`)) { syncCfg = prev; renderSync(); return; }
+    }
+    $('syncToken').value = ''; saveSyncCfg();
+    await syncNow();
+  } catch (e) { syncCfg = prev; renderSync(); setSyncStatus('Could not connect: ' + (e.message || e), true); }
+};
+$('syncNowBtn').onclick = () => syncNow();
+$('syncOff').onclick = () => {
+  if (!confirm('Disconnect sync on this device? Your data stays here and in the repository; they just stop updating each other.')) return;
+  syncCfg = null; saveSyncCfg(); $('syncToken').value = ''; $('syncToken').placeholder = 'github_pat_…'; renderSync();
+};
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+window.addEventListener('online', () => syncNow());
+setInterval(() => { if (!document.hidden) syncNow(); }, 90000);
+
 // ── Init ─────────────────────────────────────────────────
 function init() {
-  renderImportHistory();
+  renderImportHistory(); renderSync();
   renderSettings(); renderVessels(); renderLog();
   $('xFrom').dataset.init = '';
 }
