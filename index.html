@@ -704,9 +704,9 @@ function pdfKit(doc) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(pt(label), x, k.y);
     const w = doc.getTextWidth(pt(label)) + 1.5; doc.setDrawColor(0); doc.setLineWidth(0.2); doc.line(x + w, k.y + 0.8, x + width, k.y + 0.8);
   };
-  k.footers = () => {
+  k.footers = (offset = 0) => {          // offset: pages that come before this file (e.g. 1 for a letter on page 1)
     const n = doc.getNumberOfPages();
-    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0); doc.text(`Page ${i} of ${n}`, PW / 2, PH - 8, { align: 'center' }); }
+    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0); doc.text(`Page ${i + offset} of ${n + offset}`, PW / 2, PH - 8, { align: 'center' }); }
   };
   return k;
 }
@@ -840,7 +840,7 @@ function buildLetterTablePdf(list) {
     });
   });
   k.y = top + boxH + 4;
-  k.footers();
+  k.footers(1);          // the letter is page 1, so this table is page 2 of 2 (or 2 of 3 if it runs on)
   return doc;
 }
 
