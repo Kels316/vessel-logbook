@@ -100,6 +100,7 @@ td.n, th.n { text-align: right; }
       <select id="xVessel"></select>
       <div id="xPreview" style="margin-top:12px"></div>
       <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button></div>
+      <p class="note" id="x771Note" style="margin-top:8px"></p>
       <div class="warn"><b>Evidence:</b> AMSA's near coastal sea service guidance lists a Record of sea service (form 771), its sea service letter template signed by a supervisor, operator, owner, master or chief engineer, or an AMSA-approved task book. Some certificate pages also mention an approved sea service log book; this app is not AMSA-approved. Use <b>Form 771 sheets</b> (one page per vessel, duty and operation type) to complete the 771s for signature, and the <b>Logbook PDF</b> as the supporting record.</div>
       <p class="note">Creates a PDF file and downloads it (on iPhone/iPad it opens in the viewer, then use the share icon → Save to Files). Includes blank lines for you and your supervisor to sign and date. The PDF library downloads once, then works offline.</p>
     </div>
@@ -626,6 +627,8 @@ function updateExportPreview() {
     <div class="stat"><b>${fmtD(s.daysNU)}</b><span>days not underway</span></div>
     <div class="stat"><b>${fmtH(s.hours)}</b><span>trip hours (excl. period summaries)</span></div>
     <div class="stat"><b>${s.trips}</b><span>duty entries</span></div></div>`;
+  const nSum = filtered().filter(e => e.summary).length;
+  $('x771Note').textContent = nSum ? `Form 771 sheets skip the ${nSum} period summaries (already imported from 771s); the Logbook PDF includes them.` : '';
 }
 ['xFrom', 'xTo', 'xVessel'].forEach(id => $(id).onchange = updateExportPreview);
 const OPS = { C: 'Commercial', R: 'Recreational', M: 'Military' };
@@ -750,8 +753,7 @@ function build771Pdf(list) {
       ].map(r => r.map(pt)),
       didDrawCell: undefined
     });
-    const sums = es.filter(e => e.summary).map(e => `${fmtDate(e.start)} to ${fmtDate(e.end)} (${fmtD(e.days)} days)`);
-    k.para([dateList && 'Dates and hours worked: ' + dateList, sums.length && 'Imported period summaries (no daily detail): ' + sums.join('; ')].filter(Boolean).join('   '), 8);
+    k.para('Dates and hours worked: ' + dateList, 8);
     k.sig([['Applicant signature', 2], ['Date', 1]]);
     k.y += 3; k.heading('Supervisor details'); k.y += 0.5;
     k.table({
@@ -785,7 +787,13 @@ async function runExport(kind) {
   btn.disabled = true; btn.textContent = 'Creating…';
   try {
     await loadPdfLib();
-    const doc = kind === '771' ? build771Pdf(list) : buildLogbookPdf(list);
+    let doc;
+    if (kind === '771') {
+      // Period summaries came from existing 771s, so they don't need new ones
+      const own = list.filter(e => !e.summary), skipped = list.length - own.length;
+      if (!own.length) { alert(`Nothing to put on 771 sheets: all ${skipped} entries in this range are period summaries imported from existing 771s.`); btn.disabled = false; btn.textContent = label; return; }
+      doc = build771Pdf(own);
+    } else doc = buildLogbookPdf(list);
     const who = (S.profile.name || '').replace(/[^\w ]+/g, '').trim();
     doc.save(`${kind === '771' ? 'Form 771 sheets' : 'Vessel Logbook'}${who ? ' - ' + who : ''} - ${toLocalInput(new Date()).slice(0, 10)}.pdf`);
   } catch (e) { alert(e.message || 'Could not create the PDF.'); }
