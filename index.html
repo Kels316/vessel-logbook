@@ -628,7 +628,7 @@ function updateExportPreview() {
     <div class="stat"><b>${fmtH(s.hours)}</b><span>trip hours (excl. period summaries)</span></div>
     <div class="stat"><b>${s.trips}</b><span>duty entries</span></div></div>`;
   const nSum = filtered().filter(e => e.summary).length;
-  $('x771Note').textContent = nSum ? `Form 771 sheets skip the ${nSum} period summaries (already imported from 771s); the Logbook PDF includes them.` : '';
+  $('x771Note').textContent = nSum ? `Form 771 sheets skip the ${nSum} period summar${nSum === 1 ? 'y' : 'ies'} (already imported from 771s); the Logbook PDF includes ${nSum === 1 ? 'it' : 'them'}.` : '';
 }
 ['xFrom', 'xTo', 'xVessel'].forEach(id => $(id).onchange = updateExportPreview);
 const OPS = { C: 'Commercial', R: 'Recreational', M: 'Military' };
