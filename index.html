@@ -692,10 +692,11 @@ function pdfKit(doc) {
   k.sig = (labels) => {            // labelled signature lines side by side
     k.ensure(20); k.y += 7; doc.setFontSize(8); doc.setFont('helvetica', 'normal');
     const colW = (PW - 2 * PM - 10 * (labels.length - 1)) / labels.length;
-    labels.forEach(([lab, wt], i) => {
+    labels.forEach(([lab, wt, fill], i) => {
       const tot = labels.reduce((a, l) => a + l[1], 0), w = (PW - 2 * PM - 10 * (labels.length - 1)) * wt / tot;
       const x = PM + labels.slice(0, i).reduce((a, l) => a + (PW - 2 * PM - 10 * (labels.length - 1)) * l[1] / tot + 10, 0);
       doc.setDrawColor(0); doc.setLineWidth(0.3); doc.line(x, k.y, x + w, k.y); doc.text(pt(lab), x, k.y + 4);
+      if (fill) { doc.setFontSize(10); doc.text(pt(fill), x + 2, k.y - 1.5); doc.setFontSize(8); }     // pre-filled text sits on the line
     });
     k.y += 6;
   };
@@ -751,7 +752,7 @@ function buildLogbookPdf(list) {
 
 // One page per line of groupLines(): mirrors AMSA form 771 (one vessel, one operation mode, one duty type)
 function build771Pdf(list) {
-  const doc = newDoc(), k = pdfKit(doc), p = S.profile, lines = groupLines(list);
+  const doc = newDoc(), k = pdfKit(doc), p = S.profile, lines = groupLines(list), exportDate = fmtDate(toLocalInput(new Date()));
   const lab = d => { if (d.section === 'body' && d.column.index % 2 === 0) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [238, 242, 245]; } };
   lines.forEach((l, i) => {
     if (i) { doc.addPage(); k.y = PM + 4; }
@@ -778,7 +779,7 @@ function build771Pdf(list) {
       didDrawCell: undefined
     });
     k.para('Dates and hours worked: ' + dateList, 8);
-    k.sig([['Applicant signature', 2], ['Date', 1]]);
+    k.sig([['Applicant signature', 2], ['Date', 1, exportDate]]);
     k.y += 3; k.heading('Supervisor details'); k.y += 0.5;
     k.table({
       styles: { fontSize: 9, minCellHeight: 11, valign: 'middle', cellPadding: 1.4 }, didParseCell: lab,
@@ -789,7 +790,7 @@ function build771Pdf(list) {
         ['Certificate of competency held', v.supCert || '', 'Role', ['Master in charge', 'Engineer in charge', 'Owner', 'Other'].map(r => (v.supRole === r ? '[X] ' : '[  ] ') + r).join('   ')]
       ].map(r => r.map(pt))
     });
-    k.sig([['Supervisor signature (handwritten or electronic - typed names are not accepted)', 2], ['Date', 1]]);
+    k.sig([['Supervisor signature (handwritten or electronic - typed names are not accepted)', 2], ['Date', 1, exportDate]]);
     if (longList) {
       doc.addPage(); k.y = PM + 4;
       k.title(`Sheet ${i + 1} of ${lines.length} - dates and hours worked`);
