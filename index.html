@@ -135,6 +135,17 @@ td.n, th.n { text-align: right; }
       <div id="importHistory"></div>
     </div>
     <div class="card">
+      <h2>Bulk edit</h2>
+      <p class="note">Change one field on many entries at once. Period summaries are left alone. Take a backup first if you're unsure (sync history on GitHub also lets you roll back).</p>
+      <div class="row">
+        <div><label>For entries with operation type</label>
+          <select id="bkOp"><option value="R">Recreational</option><option value="C">Commercial</option><option value="M">Military</option></select></div>
+        <div><label>set Task / activity to</label><input id="bkTask" value="Recreational"></div>
+      </div>
+      <div class="note" id="bkCount" style="margin-top:8px"></div>
+      <div class="actions"><button class="btn" id="bkApply">Apply</button></div>
+    </div>
+    <div class="card">
       <h2>Sync between devices (GitHub)</h2>
       <p class="note">Keeps your logbook in a <b>private</b> GitHub repository so your phone and laptop stay in step. It works offline and syncs when you're online. Every sync is a commit, so GitHub keeps the full history.</p>
       <details style="margin:8px 0"><summary><b>Set-up steps</b></summary>
@@ -1194,9 +1205,25 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 window.addEventListener('online', () => syncNow());
 setInterval(() => { if (!document.hidden) syncNow(); }, 90000);
 
+// ── Bulk edit ────────────────────────────────────────────
+const bulkTargets = () => S.entries.filter(e => !e.summary && (e.op || 'C') === $('bkOp').value);
+function updateBulkCount() {
+  const t = bulkTargets(), task = $('bkTask').value.trim(), changing = t.filter(e => (e.activity || '') !== task).length;
+  $('bkCount').textContent = `${t.length} matching entries; ${changing} would change.`;
+  $('bkApply').disabled = !changing;
+}
+$('bkOp').onchange = $('bkTask').oninput = updateBulkCount;
+$('bkApply').onclick = () => {
+  const t = bulkTargets(), task = $('bkTask').value.trim(), todo = t.filter(e => (e.activity || '') !== task);
+  if (!todo.length) return;
+  if (!confirm(`Set Task / activity to "${task}" on ${todo.length} ${$('bkOp').selectedOptions[0].text.toLowerCase()} entries?`)) return;
+  todo.forEach(e => { e.activity = task; });
+  save(); init(); alert(`Updated ${todo.length} entries.`);
+};
+
 // ── Init ─────────────────────────────────────────────────
 function init() {
-  renderImportHistory(); renderSync();
+  renderImportHistory(); renderSync(); updateBulkCount();
   renderSettings(); renderVessels(); renderLog();
   $('xFrom').dataset.init = '';
 }
