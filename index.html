@@ -649,7 +649,7 @@ function pdfKit(doc) {
   const k = { y: PM + 4 };
   k.ensure = h => { if (k.y + h > PH - 16) { doc.addPage(); k.y = PM + 4; } };
   k.title = t => { doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(pt(t), PM, k.y); k.y += 6; };
-  k.heading = t => { k.ensure(14); k.y += 3; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(t), PM, k.y); k.y += 3.5; };
+  k.heading = t => { k.ensure(14); k.y += 2.5; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(t), PM, k.y); k.y += 3.5; };
   k.para = (t, size = 9, bold = false) => {
     doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
     const ls = doc.splitTextToSize(pt(t), PW - 2 * PM);
@@ -663,14 +663,14 @@ function pdfKit(doc) {
   };
   k.table = opts => { doc.autoTable({ ...GRID, ...opts, startY: k.y, styles: { ...GRID.styles, ...(opts.styles || {}) } }); k.y = doc.lastAutoTable.finalY + 4; };
   k.sig = (labels) => {            // labelled signature lines side by side
-    k.ensure(20); k.y += 9; doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    k.ensure(20); k.y += 7; doc.setFontSize(8); doc.setFont('helvetica', 'normal');
     const colW = (PW - 2 * PM - 10 * (labels.length - 1)) / labels.length;
     labels.forEach(([lab, wt], i) => {
       const tot = labels.reduce((a, l) => a + l[1], 0), w = (PW - 2 * PM - 10 * (labels.length - 1)) * wt / tot;
       const x = PM + labels.slice(0, i).reduce((a, l) => a + (PW - 2 * PM - 10 * (labels.length - 1)) * l[1] / tot + 10, 0);
       doc.setDrawColor(0); doc.setLineWidth(0.3); doc.line(x, k.y, x + w, k.y); doc.text(pt(lab), x, k.y + 4);
     });
-    k.y += 8;
+    k.y += 6;
   };
   k.field = (x, label, width) => {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(pt(label), x, k.y);
@@ -732,14 +732,16 @@ function build771Pdf(list) {
     const es = list.filter(e => e.vesselId === (l.vessel && l.vessel.id) && e.role === l.role && (e.duty || 'D') === l.duty && (e.op || 'C') === l.op && modeOf(e) === l.status);
     const dates = {};
     es.filter(e => !e.summary).forEach(e => Object.entries(hoursByDate(e)).forEach(([d, h]) => dates[d] = (dates[d] || 0) + h));
-    const dateList = Object.keys(dates).sort().map(d => `${fmtDate(d)} (${fmtH(dates[d])} h)`).join(', ');
+    const dayKeys = Object.keys(dates).sort(), longList = dayKeys.length > 36;      // long lists go on a continuation page so the sheet stays one page
+    const dateList = longList ? `${dayKeys.length} dates from ${fmtDate(dayKeys[0])} to ${fmtDate(dayKeys[dayKeys.length - 1])} - full list with hours on the continuation page after this sheet.`
+      : dayKeys.map(d => `${fmtDate(d)} (${fmtH(dates[d])} h)`).join(', ');
     k.title(`Near Coastal Sea Service Record (AMSA 771 data sheet) - sheet ${i + 1} of ${lines.length}`);
     k.para(`Exported on ${nowStr()} from the applicant's digital logbook. Follows AMSA form 771 (version 2, 11/22) but is not the AMSA form itself; transfer to or attach to the official form if AMSA requires it. One vessel, one mode of operation and one type of duty per sheet. 1 day = 8 hours of work. Lodge with AMSA form 426. Amendments must be signed and dated by the supervisor.`, 8);
     k.heading('Seafarer / applicant details'); k.y += 0.5;
-    k.table({ body: [['Name', p.name, 'Date of birth', p.dob ? fmtDate(p.dob) : '', 'Phone / email', p.contact].map(pt)], styles: { fontSize: 9 }, didParseCell: lab });
+    k.table({ body: [['Name', p.name, 'Date of birth', p.dob ? fmtDate(p.dob) : '', 'Phone / email', p.contact].map(pt)], styles: { fontSize: 9, cellPadding: 1.4 }, didParseCell: lab });
     k.heading('Operational and vessel details'); k.y += 0.5;
     k.table({
-      styles: { fontSize: 8.5 }, didParseCell: lab,
+      styles: { fontSize: 8.5, cellPadding: 1.3 }, didParseCell: lab,
       body: [
         ['Company / business name', v.owner, 'Position on board', l.role, 'Vessel name', v.name, 'Unique vessel identifier / IMO no.', v.reg],
         ['Start date', fmtDate(l.first), 'End date', fmtDate(l.last), 'Number of days (8 hrs)', fmtD(l.days), 'Mode of operation (1)', `${l.status} - ${MODES[l.status]}`],
@@ -751,13 +753,25 @@ function build771Pdf(list) {
     const sums = es.filter(e => e.summary).map(e => `${fmtDate(e.start)} to ${fmtDate(e.end)} (${fmtD(e.days)} days)`);
     k.para([dateList && 'Dates and hours worked: ' + dateList, sums.length && 'Imported period summaries (no daily detail): ' + sums.join('; ')].filter(Boolean).join('   '), 8);
     k.sig([['Applicant signature', 2], ['Date', 1]]);
-    k.heading('Supervisor details'); k.y += 0.5;
+    k.y += 3; k.heading('Supervisor details'); k.y += 0.5;
     k.table({
-      styles: { fontSize: 9, minCellHeight: 9 }, didParseCell: lab,
+      styles: { fontSize: 9, minCellHeight: 11, valign: 'middle', cellPadding: 1.4 }, didParseCell: lab,
+      columnStyles: { 0: { cellWidth: 54 }, 1: { cellWidth: 84 }, 2: { cellWidth: 38 }, 3: { cellWidth: 97, fontSize: 8 } },
       body: [['Supervisor name', '', 'Position (job title)', ''], ['Email', '', 'Phone', ''],
-        ['Certificate of competency held', '', 'Role', '[   ] Master in charge    [   ] Engineer in charge    [   ] Owner    [   ] Other']]
+        ['Certificate of competency held', '', 'Role', '[  ] Master in charge   [  ] Engineer in charge   [  ] Owner   [  ] Other']]
     });
     k.sig([['Supervisor signature (handwritten or electronic - typed names are not accepted)', 2], ['Date', 1]]);
+    if (longList) {
+      doc.addPage(); k.y = PM + 4;
+      k.title(`Sheet ${i + 1} of ${lines.length} - dates and hours worked`);
+      k.para(`${p.name || ''} | ${v.name || ''} ${v.reg ? '(' + v.reg + ')' : ''} | ${l.role}, duty ${l.duty}, ${OPS[l.op].toLowerCase()}, ${l.status} | ${dayKeys.length} dates, ${fmtD(l.days)} day(s) (8 h)`, 9);
+      const cells = dayKeys.map(d => [fmtDate(d), fmtH(dates[d])]), perRow = 5, body = [];
+      for (let r = 0; r < cells.length; r += perRow) { const row = []; for (let c = 0; c < perRow; c++) row.push(...(cells[r + c] || ['', ''])); body.push(row); }
+      k.table({
+        head: [Array.from({ length: perRow }, () => ['Date', 'Hours']).flat()], body,
+        columnStyles: Object.fromEntries(Array.from({ length: perRow }, (_, c) => [c * 2 + 1, { halign: 'right' }]))
+      });
+    }
   });
   k.footers();
   return doc;
