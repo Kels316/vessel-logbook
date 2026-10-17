@@ -259,6 +259,22 @@ td.n, th.n { text-align: right; }
     <div class="row">
       <div><label>Company / business name</label><input id="vOwner"></div>
     </div>
+    <h2 style="font-size:15px;margin:14px 0 2px">Supervisor details for 771 sheets</h2>
+    <p class="note">Optional. Pre-fills the supervisor section on this vessel's 771 sheets. The supervisor still has to sign and date by hand.</p>
+    <div class="row">
+      <div><label>Supervisor name</label><input id="vsName"></div>
+      <div><label>Position (job title)</label><input id="vsPos"></div>
+    </div>
+    <div class="row">
+      <div><label>Email</label><input id="vsEmail" inputmode="email" autocapitalize="off"></div>
+      <div><label>Phone</label><input id="vsPhone" inputmode="tel"></div>
+    </div>
+    <div class="row">
+      <div><label>Certificate of competency held</label><input id="vsCert"></div>
+      <div><label>Supervisor role</label>
+        <select id="vsRole"><option value="">— none —</option><option>Master in charge</option><option>Engineer in charge</option><option>Owner</option><option>Other</option></select></div>
+    </div>
+    <div class="actions" style="margin-top:8px"><button type="button" class="btn sec sm" id="vsUseMe">Use my details (Owner)</button></div>
     <div class="warn hidden" id="vErr"></div>
     <div class="actions">
       <button type="button" class="btn" id="vSave">Save</button>
@@ -533,19 +549,27 @@ function openVessel(id) {
   $('vType').value = v.type || ''; $('vProp').value = v.prop || '';
   $('vKw').value = v.kw ?? ''; $('vEng').value = v.eng ?? '';
   $('vOwner').value = v.owner || '';
+  $('vsName').value = v.supName || ''; $('vsPos').value = v.supPos || ''; $('vsEmail').value = v.supEmail || ''; $('vsPhone').value = v.supPhone || ''; $('vsCert').value = v.supCert || ''; $('vsRole').value = v.supRole || '';
   $('vDelete').classList.toggle('hidden', !editingVessel);
   $('vErr').classList.add('hidden');
   $('dlgVessel').showModal();
 }
 $('btnAddVessel').onclick = () => openVessel(null);
 $('vCancel').onclick = () => $('dlgVessel').close();
+$('vsUseMe').onclick = () => {      // fill name and contact from the profile (certificate, position and phone are left for you to type)
+  const c = S.profile.contact || '';
+  if (S.profile.name) $('vsName').value = S.profile.name;
+  if (/@/.test(c)) $('vsEmail').value = c; else if (c) $('vsPhone').value = c;
+  $('vsRole').value = 'Owner';
+};
 $('vSave').onclick = () => {
   const name = $('vName').value.trim();
   if (!name) { $('vErr').textContent = 'Vessel name is required.'; $('vErr').classList.remove('hidden'); return; }
   const rec = {
     id: editingVessel ? editingVessel.id : uid(), name, reg: $('vReg').value.trim(),
     len: $('vLen').value === '' ? null : +$('vLen').value, type: $('vType').value.trim(),
-    prop: $('vProp').value.trim(), kw: $('vKw').value === '' ? null : +$('vKw').value, eng: $('vEng').value === '' ? null : +$('vEng').value, owner: $('vOwner').value.trim()
+    prop: $('vProp').value.trim(), kw: $('vKw').value === '' ? null : +$('vKw').value, eng: $('vEng').value === '' ? null : +$('vEng').value, owner: $('vOwner').value.trim(),
+    supName: $('vsName').value.trim(), supPos: $('vsPos').value.trim(), supEmail: $('vsEmail').value.trim(), supPhone: $('vsPhone').value.trim(), supCert: $('vsCert').value.trim(), supRole: $('vsRole').value
   };
   if (editingVessel) Object.assign(editingVessel, rec); else { S.vessels.push(rec); if (!S.settings.lastVessel) S.settings.lastVessel = rec.id; }
   save(); $('dlgVessel').close(); renderVessels(); renderLog();
@@ -759,8 +783,11 @@ function build771Pdf(list) {
     k.table({
       styles: { fontSize: 9, minCellHeight: 11, valign: 'middle', cellPadding: 1.4 }, didParseCell: lab,
       columnStyles: { 0: { cellWidth: 54 }, 1: { cellWidth: 84 }, 2: { cellWidth: 38 }, 3: { cellWidth: 97, fontSize: 8 } },
-      body: [['Supervisor name', '', 'Position (job title)', ''], ['Email', '', 'Phone', ''],
-        ['Certificate of competency held', '', 'Role', '[  ] Master in charge   [  ] Engineer in charge   [  ] Owner   [  ] Other']]
+      body: [
+        ['Supervisor name', v.supName || '', 'Position (job title)', v.supPos || ''],
+        ['Email', v.supEmail || '', 'Phone', v.supPhone || ''],
+        ['Certificate of competency held', v.supCert || '', 'Role', ['Master in charge', 'Engineer in charge', 'Owner', 'Other'].map(r => (v.supRole === r ? '[X] ' : '[  ] ') + r).join('   ')]
+      ].map(r => r.map(pt))
     });
     k.sig([['Supervisor signature (handwritten or electronic - typed names are not accepted)', 2], ['Date', 1]]);
     if (longList) {
