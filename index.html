@@ -99,7 +99,7 @@ td.n, th.n { text-align: right; }
       <label>Vessel</label>
       <select id="xVessel"></select>
       <div id="xPreview" style="margin-top:12px"></div>
-      <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button></div>
+      <div class="actions"><button class="btn" id="btnPdf">Logbook PDF</button><button class="btn sec" id="btnPdf771">Form 771 sheets</button><button class="btn sec" id="btnPdfLetter">Sea service letter table</button></div>
       <p class="note" id="x771Note" style="margin-top:8px"></p>
       <div class="warn"><b>Evidence:</b> AMSA's near coastal sea service guidance lists a Record of sea service (form 771), its sea service letter template signed by a supervisor, operator, owner, master or chief engineer, or an AMSA-approved task book. Some certificate pages also mention an approved sea service log book; this app is not AMSA-approved. Use <b>Form 771 sheets</b> (one page per vessel, duty and operation type) to complete the 771s for signature, and the <b>Logbook PDF</b> as the supporting record.</div>
       <p class="note">Creates a PDF file and downloads it (on iPhone/iPad it opens in the viewer, then use the share icon → Save to Files). Includes blank lines for you and your supervisor to sign and date. The PDF library downloads once, then works offline.</p>
@@ -807,11 +807,48 @@ function build771Pdf(list) {
   return doc;
 }
 
+// Table in the layout of page 2 of AMSA's near coastal sea service letter template (the letter itself is on your letterhead)
+function buildLetterTablePdf(list) {
+  const doc = newDoc(), k = pdfKit(doc), lines = groupLines(list);
+  k.y = PM + 2;
+  k.table({
+    theme: 'grid',
+    styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.8, lineColor: [0, 0, 0], lineWidth: 0.35, minCellHeight: 9 },
+    headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'normal', fontSize: 7.5, lineColor: [0, 0, 0], lineWidth: 0.35 },
+    head: [['Name of vessel', 'Unique Identifier/IMO number', 'Vessel measured length', 'Propulsion power (kW)', 'Propulsion type(3)', 'Mode of operation(1)', 'Duties performed(2)', 'Start date', 'End date', 'Number of days (8 hours)', 'Position on board (e.g. GPH, Master, engineer)', 'Type of operation (C/R/M)']],
+    body: lines.map(l => { const v = l.vessel || {}; return [v.name, v.reg, v.len ?? '', v.kw ?? '', v.prop || '', l.status, l.duty, fmtDate(l.first), fmtDate(l.last), fmtD(l.days), l.role, l.op].map(pt); }),
+    columnStyles: { 0: { cellWidth: 33 }, 1: { cellWidth: 27 }, 2: { cellWidth: 18 }, 3: { cellWidth: 18 }, 4: { cellWidth: 20 }, 5: { cellWidth: 21 }, 6: { cellWidth: 22 }, 7: { cellWidth: 22 }, 8: { cellWidth: 22 }, 9: { cellWidth: 20 }, 10: { cellWidth: 29 }, 11: { cellWidth: 21 } }
+  });
+  // Legend box, as printed on the template
+  const cols = [[PM + 2, 82, 'Mode of operation (1):', [['VU', 'Vessel underway'], ['NUD', 'Not underway deck or refit work'], ['NUE', 'Not underway engine or refit work']]],
+    [PM + 84, 95, 'Duties performed (2):', [['AE', 'Assistant to Engineer or Engine Driver'], ['E', 'Engineer or Engine Driver'], ['EW', 'Engineer watchkeeper'], ['EIC', 'Engineer in charge'], null,
+      ['D', 'Deck work'], ['DE', 'Deck and engineering work'], ['GPH', 'General purpose hand'], ['INW', 'In charge of navigation watch/officer of watch'], ['C', 'Coxswain grade 1, 2 or 3']]],
+    [PM + 179, 45, 'Propulsion type (3):', [['I', 'Inboard'], ['O', 'Outboard'], ['S', 'Steam']]]];
+  const boxH = 8 + 11 * 4.2 + 3;
+  k.ensure(boxH + 8); const top = k.y + 6;
+  doc.setDrawColor(0); doc.setLineWidth(0.35);
+  doc.rect(PM + 2, top, 222, boxH); doc.line(PM + 2, top + 7, PM + 224, top + 7);
+  cols.slice(1).forEach(c => doc.line(c[0], top, c[0], top + boxH));
+  cols.forEach(([x, w, head, items]) => {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text(pt(head), x + 1.5, top + 5);
+    let y = top + 7 + 4.6;
+    items.forEach(it => {
+      if (!it) { y += 4.2; return; }
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.text(pt(it[0]) + ':', x + 1.5, y);
+      const cw = doc.getTextWidth(pt(it[0]) + ': ');
+      doc.setFont('helvetica', 'normal'); doc.text(pt(it[1]), x + 1.5 + cw, y); y += 4.2;
+    });
+  });
+  k.y = top + boxH + 4;
+  k.footers();
+  return doc;
+}
+
 async function runExport(kind) {
   const list = filtered();
   if (!list.length) return alert('No completed entries in that range.');
   if (!S.profile.name && !confirm('Your name is blank (Settings tab). Create the report anyway?')) return;
-  const btn = $(kind === '771' ? 'btnPdf771' : 'btnPdf'), label = btn.textContent;
+  const btn = $(kind === '771' ? 'btnPdf771' : kind === 'letter' ? 'btnPdfLetter' : 'btnPdf'), label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Creating…';
   try {
     await loadPdfLib();
@@ -821,14 +858,16 @@ async function runExport(kind) {
       const own = list.filter(e => !e.summary), skipped = list.length - own.length;
       if (!own.length) { alert(`Nothing to put on 771 sheets: all ${skipped} entries in this range are period summaries imported from existing 771s.`); btn.disabled = false; btn.textContent = label; return; }
       doc = build771Pdf(own);
-    } else doc = buildLogbookPdf(list);
+    } else if (kind === 'letter') doc = buildLetterTablePdf(list);
+    else doc = buildLogbookPdf(list);
     const who = (S.profile.name || '').replace(/[^\w ]+/g, '').trim();
-    doc.save(`${kind === '771' ? 'Form 771 sheets' : 'Vessel Logbook'}${who ? ' - ' + who : ''} - ${toLocalInput(new Date()).slice(0, 10)}.pdf`);
+    doc.save(`${kind === '771' ? 'Form 771 sheets' : kind === 'letter' ? 'Sea service letter table' : 'Vessel Logbook'}${who ? ' - ' + who : ''} - ${toLocalInput(new Date()).slice(0, 10)}.pdf`);
   } catch (e) { alert(e.message || 'Could not create the PDF.'); }
   btn.disabled = false; btn.textContent = label;
 }
 $('btnPdf').onclick = () => runExport('log');
 $('btnPdf771').onclick = () => runExport('771');
+$('btnPdfLetter').onclick = () => runExport('letter');
 
 // ── Settings ─────────────────────────────────────────────
 function renderSettings() {
